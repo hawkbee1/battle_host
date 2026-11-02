@@ -1,0 +1,12 @@
+name: battle_host
+description: Simulation host of Battle Team, a native executable that runs battles in memory.
+version: 0.1.0+1
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+
+dev_dependencies:
+  test: ^1.31.0
+  very_good_analysis: ^11.0.0
