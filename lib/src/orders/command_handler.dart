@@ -2,6 +2,7 @@ import 'package:battle_host/src/core/battle.dart';
 import 'package:battle_host/src/core/battle_state.dart';
 import 'package:battle_host/src/orders/order_chain.dart';
 import 'package:battle_host/src/orders/refusal.dart';
+import 'package:battle_host/src/orders/relics.dart';
 import 'package:battle_host/src/orders/rewards.dart';
 import 'package:battle_host/src/orders/section_orders.dart';
 import 'package:battle_host/src/orders/world.dart';
@@ -16,7 +17,11 @@ import 'package:battle_rules/battle_rules.dart';
 String hqId(String team) => 'hq-$team';
 
 /// A route: its cells, and its samples priced by the movement cost.
-typedef _Route = ({List<CellRef> cells, List<PathSample> samples});
+typedef _Route = ({
+  List<CellRef> cells,
+  List<PathSample> samples,
+  List<CellRef> falls,
+});
 
 /// {@template command_handler}
 /// The command handler of one battle: every order of every sender goes
@@ -94,19 +99,25 @@ final class CommandHandler {
     return HandledOrder(events: react(before, (plan as PlanReady).apply()));
   }
 
+  /// Relics, eliminations and the end of the battle.
+  late final relics = Relics(battle: battle, world: world, orders: this);
+
   late final _listeners = <BattleListener>[
+    relics,
     Rewards(battle: battle, world: world),
     StorageLocks(battle),
   ];
 
   /// [events], which changed the state from [before], with what follows
-  /// from them: XP, money and locks (Observer).
+  /// from them: pushes, captures and eliminations, then XP and money, then
+  /// locks (Observer). Each listener hears the events of those before it.
   List<BattleEvent> react(BattleState before, List<BattleEvent> events) {
     if (events.isEmpty) return events;
-    return [
-      ...events,
-      for (final listener in _listeners) ...listener.hear(events, before),
-    ];
+    final all = [...events];
+    for (final listener in _listeners) {
+      all.addAll(listener.hear(List.unmodifiable(all), before));
+    }
+    return all;
   }
 
   OrderPlan _plan(OrderCheckContext context) {
@@ -246,7 +257,7 @@ final class CommandHandler {
       path,
     );
     if (route case PlanRefused()) return route as OrderPlan;
-    final (cells: _, :samples) = route as _Route;
+    final (cells: _, :samples, falls: _) = route as _Route;
     // The path search prices with the same movement cost: a path it gives
     // is passable.
     final movement = _cost.move(
@@ -293,6 +304,7 @@ final class CommandHandler {
     );
     final List<CellRef> route;
     final List<nav.PathSample> samples;
+    final List<CellRef> falls;
     if (path != null) {
       final cells = [for (final cell in path) world.cellOf(cell)];
       if (cells.contains(null)) return refused(HostRule.offMap);
@@ -302,9 +314,10 @@ final class CommandHandler {
       switch (finder.check(mover: mover, path: cells.cast<CellRef>())) {
         case PathFails(:final reason):
           return refused(reason);
-        case PathPasses(samples: final passed):
+        case PathPasses(samples: final passed, falls: final fell):
           route = cells.cast<CellRef>();
           samples = passed;
+          falls = fell;
       }
     } else {
       final onGround =
@@ -317,9 +330,11 @@ final class CommandHandler {
       if (found == null) return refused(HostRule.noPath);
       route = found.cells;
       samples = found.samples;
+      falls = found.falls;
     }
     return (
       cells: route,
+      falls: falls,
       samples: [
         for (final sample in samples)
           PathSample(
@@ -340,19 +355,23 @@ final class CommandHandler {
     final pathMover = PathMover(apPerM: mover.apPerM, modes: mover.modes);
     final route = _route(pathMover, team.hq.cell, goal, path);
     if (route case PlanRefused()) return route as OrderPlan;
-    final (:cells, :samples) = route as _Route;
-    // HQ-12: any unit standing on the path ends the order.
+    final (:cells, :samples, :falls) = route as _Route;
+    // HQ-12: any unit standing on the path ends the order; HQ-48: units
+    // where it lands after a fall are killed, not in its way.
+    final along = alongOf(pathMover, cells);
     double? blockedAtM;
     var stop = goal;
-    var along = 0.0;
+    var stopIndex = cells.length - 1;
     for (var i = 1; i < cells.length; i++) {
-      along += samples[i - 1].lengthM;
-      final standing = _state.units.values.any(
-        (unit) => unit.onField && unit.cell == cells[i],
-      );
+      final standing =
+          !falls.contains(cells[i]) &&
+          _state.units.values.any(
+            (unit) => unit.onField && unit.cell == cells[i],
+          );
       if (standing) {
-        blockedAtM = along - samples[i - 1].lengthM;
+        blockedAtM = along[i - 1];
         stop = cells[i - 1];
+        stopIndex = i - 1;
         break;
       }
     }
@@ -378,9 +397,16 @@ final class CommandHandler {
           ),
         ),
       );
+      final landed = [
+        for (final cell in falls)
+          if (cells.indexOf(cell) <= stopIndex)
+            for (final unit in _state.units.values.toList())
+              if (unit.onField && unit.cell == cell) unit.id,
+      ];
       return [
         MoveStarted(moverId: id, arrivesAt: moved.movement.arrivesAt),
         if (moved.endedByUnit) MoveStopped(moverId: id, at: _positionOf(stop)),
+        for (final unitId in landed) ...crush(unitId, by: id),
       ];
     });
   }
@@ -420,6 +446,25 @@ final class CommandHandler {
         )
         .fold(0, (xp, unit) => xp + unit.xp.earned),
   );
+
+  /// The distance along [cells], a path [mover] passes, at which it
+  /// reaches each of them: a step gives several samples, a fall none.
+  List<double> alongOf(PathMover mover, List<CellRef> cells) {
+    final finder = Pathfinder(
+      map: battle.map.host.navigation,
+      cost: battle.map.cost,
+      rules: battle.map.rules,
+    );
+    final along = <double>[0];
+    for (var i = 1; i < cells.length; i++) {
+      final step = finder.check(mover: mover, path: [cells[i - 1], cells[i]]);
+      along.add(
+        along.last +
+            (step as PathPasses).samples.fold(0.0, (sum, s) => sum + s.lengthM),
+      );
+    }
+    return along;
+  }
 
   // Weapons (COMBAT-26 to COMBAT-33, COMBAT-56).
 
@@ -921,7 +966,9 @@ final class CommandHandler {
   (CellRef, bool, String, double)? _targetCell(String targetId) {
     if (targetId.startsWith('hq-')) {
       final team = _state.teams[targetId.substring(3)];
-      return team == null ? null : (team.hq.cell, false, 'hq', 0.0);
+      return team == null || team.eliminated
+          ? null
+          : (team.hq.cell, false, 'hq', 0.0);
     }
     final target = _state.units[targetId];
     if (target == null || !target.onField) return null;
@@ -1048,6 +1095,33 @@ final class CommandHandler {
     return impacts;
   }
 
+  /// [unit] dies now: it drops its weapon as [dropId] (COMBAT-29); a
+  /// commander resurrects in storage with his section (UNIT-28, UNIT-29).
+  List<BattleEvent> _dies(UnitState unit, String dropId) {
+    final dropped = _armory.drop(unit.weapon, _now);
+    final events = <BattleEvent>[
+      if (dropped != null) _drop(dropped, unit.cell!, dropId),
+    ];
+    if (unit.type.permadeath) {
+      battle.change((state) => state.withoutUnit(unit.id));
+    } else {
+      events.addAll(sections.commanderDied(unit));
+    }
+    return events;
+  }
+
+  /// The unit [unitId] crushed now by the relic or HQ [by], whatever its
+  /// team: it dies (RELIC-25, decision 138). A unit that left the field
+  /// since is spared.
+  List<BattleEvent> crush(String unitId, {required String by}) {
+    final unit = _state.units[unitId];
+    if (unit == null || !unit.onField) return const [];
+    return [
+      Crushed(unitId: unit.id, unitType: unit.type.id, byId: by),
+      ..._dies(unit, 'w-$by-${unit.id}-${_now.inSeconds}'),
+    ];
+  }
+
   Impact _hurt(UnitState shooter, UnitState target, double amount, int seq) {
     final health = target.health.damaged(amount);
     final friendly = _teamOf(target) == _teamOf(shooter);
@@ -1069,16 +1143,7 @@ final class CommandHandler {
       switch (outcome) {
         case ZeroHpOutcome.death:
           result = ImpactResult.killed;
-          final dropped = _armory.drop(target.weapon, _now);
-          if (dropped != null) {
-            _pending.add(_drop(dropped, target.cell!, 'w-$seq-${target.id}'));
-          }
-          // Commanders resurrect in storage (UNIT-28, UNIT-29).
-          if (target.type.permadeath) {
-            battle.change((state) => state.withoutUnit(target.id));
-          } else {
-            _pending.addAll(sections.commanderDied(target));
-          }
+          _pending.addAll(_dies(target, 'w-$seq-${target.id}'));
         case ZeroHpOutcome.defection:
           result = ImpactResult.defected;
           _put(target.copyWith(sectionId: shooter.sectionId, health: health));
@@ -1221,11 +1286,12 @@ final class CommandHandler {
               hitBox: other.type.hitBox,
             ),
         for (final team in _state.teams.values)
-          ShotTarget(
-            id: hqId(team.id),
-            position: world.pointOf(team.hq.cell),
-            hitBox: battle.settings.hq.hitBox,
-          ),
+          if (!team.eliminated)
+            ShotTarget(
+              id: hqId(team.id),
+              position: world.pointOf(team.hq.cell),
+              hitBox: battle.settings.hq.hitBox,
+            ),
       ];
       final outcome = _firstPerson.fire(
         weapon: weapon,

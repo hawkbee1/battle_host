@@ -58,6 +58,38 @@ final class RecallEnds extends BattleTimer {
   final String unitId;
 }
 
+/// {@template capture_ends}
+/// The 30-minute capture of [relicId] ends, unless it was lost since
+/// (RELIC-05, RELIC-08).
+/// {@endtemplate}
+final class CaptureEnds extends BattleTimer {
+  /// {@macro capture_ends}
+  const new(this.relicId);
+
+  /// The relic.
+  final String relicId;
+}
+
+/// {@template relic_arrives}
+/// The push of [relicId] reaches where it stops (RELIC-24).
+/// {@endtemplate}
+final class RelicArrives extends BattleTimer {
+  /// {@macro relic_arrives}
+  const new(this.relicId);
+
+  /// The relic.
+  final String relicId;
+}
+
+/// {@template hold_ends}
+/// A team's relic hold reaches its end: it wins unless it was reset
+/// (RELIC-14).
+/// {@endtemplate}
+final class HoldEnds extends BattleTimer {
+  /// {@macro hold_ends}
+  const new();
+}
+
 /// {@template flight_ends}
 /// The landing or take-off of [unitId] ends: it [flying] or not.
 /// {@endtemplate}
@@ -179,6 +211,12 @@ final class Battle {
       minStartingMoney:
           setup.minStartingMoney ?? definitions.economy.minStartingMoney,
       state: BattleState(
+        victory: VictoryRules(settings.victory).start(
+          relics: [
+            for (var i = 1; i <= map.host.relicStarts.length; i++) 'relic-$i',
+          ],
+          teams: teams.keys,
+        ),
         weather: settings.weather.states.first,
         units: Map.unmodifiable(units),
         sections: Map.unmodifiable(sections),
@@ -312,6 +350,15 @@ final class Battle {
         before,
         orders.sections.finishRecall(unitId),
       ),
+      CaptureEnds(:final relicId) => orders.react(
+        before,
+        orders.relics.finishCapture(relicId),
+      ),
+      RelicArrives(:final relicId) => orders.react(
+        before,
+        orders.relics.finishPush(relicId),
+      ),
+      HoldEnds() => orders.react(before, orders.relics.holdDue()),
       FlightEnds(:final unitId, :final flying) => orders.finishFlight(
         unitId,
         flying: flying,

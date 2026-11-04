@@ -1289,7 +1289,9 @@ void main() {
         expect(added.potAp, equals(5.0 * i));
         f.wait(const Duration(hours: 3));
       }
-      expect(f.battle.state.relics['relic-1']!.capturePot!.fullAt, isNotNull);
+      // Full, then captured 30 minutes later (RELIC-05).
+      final relic = f.battle.state.relics['relic-1']!;
+      expect((relic.owner, relic.capturePot), equals(('team-1', null)));
     });
 
     test('RELIC-06 a capture is refused with an enemy in the radius, outside '

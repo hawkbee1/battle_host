@@ -86,6 +86,9 @@ final class SenderCheck implements OrderCheck {
 
   @override
   OrderRefusal? check(OrderCheckContext context) {
+    if (context.state.ended) {
+      return const SenderRefused(SenderProblem.battleOver);
+    }
     final sender = context.command.sender;
     final section = context.state.sections[sender.sectionId];
     if (section == null) {

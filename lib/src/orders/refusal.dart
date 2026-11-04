@@ -65,8 +65,11 @@ enum SenderProblem {
   /// The section is another account's.
   notYourSection,
 
-  /// The section's team is out of the battle.
+  /// The section's team is out of the battle (HQ-18).
   teamEliminated,
+
+  /// The battle has ended.
+  battleOver,
 }
 
 /// {@template sender_refused}

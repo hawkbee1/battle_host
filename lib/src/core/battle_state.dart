@@ -303,11 +303,56 @@ final class TeamState {
     managerAccountId: accountId,
     eliminated: eliminated,
   );
+
+  /// This team out of the battle (HQ-18).
+  TeamState get out => TeamState(
+    id: id,
+    hq: hq,
+    managerAccountId: managerAccountId,
+    eliminated: true,
+  );
+}
+
+/// {@template relic_push}
+/// A push under way (RELIC-24): the relic reaches [cell], the [reached]th
+/// cell of its path, at [endsAt], with [pot] left; it crushes [crushed] on
+/// the way (RELIC-25) and, when it goes over an island's edge, lands on
+/// [landing] (RELIC-22).
+/// {@endtemplate}
+final class RelicPush {
+  /// {@macro relic_push}
+  const new({
+    required this.cell,
+    required this.reached,
+    required this.endsAt,
+    required this.pot,
+    this.crushed = const [],
+    this.landing,
+  });
+
+  /// Where it stops.
+  final CellRef cell;
+
+  /// How many cells of its path it covers.
+  final int reached;
+
+  /// The battle time it stops.
+  final Duration endsAt;
+
+  /// Its pot when it stops.
+  final PushPot pot;
+
+  /// The units it crushes on the way.
+  final List<String> crushed;
+
+  /// The ground cell it falls on; null when it does not fall.
+  final CellRef? landing;
 }
 
 /// {@template relic_state}
-/// A relic: its [cell], its owner, its pots (RELIC-05, RELIC-24) and the
-/// path its owner's push follows (decision 219).
+/// A relic: its [cell], its owner, its pots (RELIC-05, RELIC-24), the
+/// path its owner's push follows (decision 219), the units that pushed
+/// since its push pot was last empty, and the push under way.
 /// {@endtemplate}
 final class RelicState {
   /// {@macro relic_state}
@@ -318,12 +363,14 @@ final class RelicState {
     this.capturePot,
     this.pushPot,
     this.pushPath,
+    this.pushers = const {},
+    this.push,
   });
 
   /// The relic.
   final String id;
 
-  /// Where it stands.
+  /// Where it stands; where it stops while it is pushed.
   final CellRef cell;
 
   /// The team that owns it; null before its first capture.
@@ -338,18 +385,43 @@ final class RelicState {
   /// The path of the push, chosen while the pot was empty.
   final List<CellRef>? pushPath;
 
+  /// The units that put AP into its push pot since it was last empty: its
+  /// pushers while they are on the field (RELIC-24; assumed, Q-REL-15).
+  final Set<String> pushers;
+
+  /// The push under way; null while it stands still.
+  final RelicPush? push;
+
   /// This relic with the pots and path given.
   RelicState withPots({
     CapturePot? capturePot,
     PushPot? pushPot,
     List<CellRef>? pushPath,
+  }) => copyWith(
+    capturePot: () => capturePot ?? this.capturePot,
+    pushPot: () => pushPot ?? this.pushPot,
+    pushPath: () => pushPath ?? this.pushPath,
+  );
+
+  /// This relic with the values given changed; a function gives a value
+  /// that may be null.
+  RelicState copyWith({
+    CellRef? cell,
+    String? owner,
+    CapturePot? Function()? capturePot,
+    PushPot? Function()? pushPot,
+    List<CellRef>? Function()? pushPath,
+    Set<String>? pushers,
+    RelicPush? Function()? push,
   }) => RelicState(
     id: id,
-    cell: cell,
-    owner: owner,
-    capturePot: capturePot ?? this.capturePot,
-    pushPot: pushPot ?? this.pushPot,
-    pushPath: pushPath ?? this.pushPath,
+    cell: cell ?? this.cell,
+    owner: owner ?? this.owner,
+    capturePot: capturePot == null ? this.capturePot : capturePot(),
+    pushPot: pushPot == null ? this.pushPot : pushPot(),
+    pushPath: pushPath == null ? this.pushPath : pushPath(),
+    pushers: pushers ?? this.pushers,
+    push: push == null ? this.push : push(),
   );
 }
 
@@ -385,6 +457,8 @@ final class BattleState {
     this.dropped = const {},
     this.structures = const {},
     this.offers = const {},
+    this.victory,
+    this.eliminated = const [],
   });
 
   /// The units, by ID.
@@ -408,6 +482,16 @@ final class BattleState {
   /// The structures built in the battle, by site ID: their type and cells.
   /// The world delta layer applies them to paths and sight (M5.14).
   final Map<String, (String, List<CellRef>)> structures;
+
+  /// Relic owners, the teams still in, the running hold and the winner
+  /// (RELIC-14, HQ-45); null only for a state built by hand.
+  final VictoryState? victory;
+
+  /// The teams eliminated, first first (HQ-18).
+  final List<String> eliminated;
+
+  /// Whether the battle has ended.
+  bool get ended => victory?.winner != null;
 
   /// The prisoner offers waiting for an answer, by offer id: the sequence
   /// number of the order that posted it (COMBAT-44).
@@ -453,6 +537,11 @@ final class BattleState {
   BattleState withStructure(String siteId, String type, List<CellRef> cells) =>
       _with(structures: {...structures, siteId: (type, cells)});
 
+  /// This state without the relic [relicId], which left the battle
+  /// (RELIC-26).
+  BattleState withoutRelic(String relicId) =>
+      _with(relics: {...relics}..remove(relicId));
+
   /// This state with [offer] waiting as [offerId].
   BattleState withOffer(int offerId, PrisonerOffer offer) =>
       _with(offers: {...offers, offerId: offer});
@@ -460,6 +549,11 @@ final class BattleState {
   /// This state without the offer [offerId].
   BattleState withoutOffer(int offerId) =>
       _with(offers: {...offers}..remove(offerId));
+
+  /// This state with [victory] as its victory state, and [eliminated] as
+  /// its eliminated teams when given.
+  BattleState withVictory(VictoryState victory, {List<String>? eliminated}) =>
+      _with(victory: victory, eliminated: eliminated);
 
   BattleState _with({
     Map<String, UnitState>? units,
@@ -469,6 +563,8 @@ final class BattleState {
     Map<String, DroppedWeaponState>? dropped,
     Map<String, (String, List<CellRef>)>? structures,
     Map<int, PrisonerOffer>? offers,
+    VictoryState? victory,
+    List<String>? eliminated,
   }) => BattleState(
     units: units == null ? this.units : Map.unmodifiable(units),
     sections: sections == null ? this.sections : Map.unmodifiable(sections),
@@ -480,5 +576,9 @@ final class BattleState {
         ? this.structures
         : Map.unmodifiable(structures),
     offers: offers == null ? this.offers : Map.unmodifiable(offers),
+    victory: victory ?? this.victory,
+    eliminated: eliminated == null
+        ? this.eliminated
+        : List.unmodifiable(eliminated),
   );
 }

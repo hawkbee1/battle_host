@@ -212,6 +212,14 @@ String fingerprint(BattleState state) {
         section.lockedUntil,
       ].join(' '),
     'offers ${state.offers.keys}',
+    [
+      'victory',
+      state.victory?.relicOwners,
+      state.victory?.teams,
+      state.victory?.hold?.winsAt,
+      state.victory?.winner?.team,
+      state.eliminated,
+    ].join(' '),
     for (final team in state.teams.values)
       [
         team.id,
@@ -228,6 +236,8 @@ String fingerprint(BattleState state) {
         relic.capturePot?.contributions,
         relic.pushPot?.ap,
         relic.pushPath,
+        relic.pushers,
+        relic.push?.endsAt,
       ].join(' '),
     for (final dropped in state.dropped.values)
       '${dropped.id} ${dropped.dropped.weapon.id} ${dropped.cell}',

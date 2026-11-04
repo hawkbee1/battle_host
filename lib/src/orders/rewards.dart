@@ -64,6 +64,20 @@ final class Rewards implements BattleListener {
           final healer = _state.units[unitId]!;
           _award(unitId, RoleActionXp(FromTarget(targetId)));
           _pay(healer.sectionId, HealEarning(healer.type));
+        case RelicCaptured(:final relicId):
+          // UNIT-07, decision 179: shared by the AP each unit put in.
+          final pot = before.relics[relicId]!.capturePot!;
+          for (final MapEntry(key: unitId, value: xp)
+              in _xp.captureShares(pot).entries) {
+            _gain(unitId, xp);
+          }
+        case BattleEnded(:final winner):
+          // UNIT-11: every unit of the winning team.
+          for (final unit in _state.units.values.toList()) {
+            if (_state.sections[unit.sectionId]!.team == winner) {
+              _gain(unit.id, _xp.victoryXp);
+            }
+          }
         case _:
           break;
       }
@@ -146,6 +160,19 @@ final class Rewards implements BattleListener {
     );
   }
 
+  /// Gives [unitId] [xp] that no repeat shrinks, less its section's share.
+  void _gain(String unitId, double xp) {
+    final unit = _state.units[unitId];
+    if (unit == null) return;
+    final split = _xp.split(xp);
+    final section = _state.sections[unit.sectionId]!;
+    battle.change(
+      (state) => state
+          .withUnit(unit.copyWith(xp: unit.xp.gained(split.unit)))
+          .withSection(section.withWallet(xp: section.xp + split.section)),
+    );
+  }
+
   void _pay(String sectionId, Earning earning) {
     final amount = _money.earned(earning);
     if (amount == 0) return;
@@ -208,6 +235,7 @@ final class StorageLocks implements BattleListener {
     final state = battle.state;
     final locked = <BattleEvent>[];
     for (final section in state.sections.values) {
+      if (state.teams[section.team]!.eliminated) continue;
       bool onField(UnitState unit) =>
           unit.sectionId == section.id && unit.onField && unit.type.storable;
       if (!before.units.values.any(onField)) continue;
@@ -228,18 +256,30 @@ final class StorageLocks implements BattleListener {
     return locked;
   }
 
-  /// Whether [events] killed the commander of [sectionId] (UNIT-28).
+  /// Whether [events] killed the commander of [sectionId], by a shot or a
+  /// crush (UNIT-28).
   static bool _commanderDied(
     List<BattleEvent> events,
     BattleState before,
     String sectionId,
-  ) => events.whereType<Attacked>().any(
-    (attack) => attack.impacts.any((impact) {
-      final target = before.units[impact.targetId];
-      return impact.result == ImpactResult.killed &&
-          target != null &&
-          target.sectionId == sectionId &&
-          target.type.category == commanderCategory;
-    }),
-  );
+  ) {
+    bool commander(String unitId) {
+      final unit = before.units[unitId];
+      return unit != null &&
+          unit.sectionId == sectionId &&
+          unit.type.category == commanderCategory;
+    }
+
+    return events.any(
+      (event) => switch (event) {
+        Attacked(:final impacts) => impacts.any(
+          (impact) =>
+              impact.result == ImpactResult.killed &&
+              commander(impact.targetId),
+        ),
+        Crushed(:final unitId) => commander(unitId),
+        _ => false,
+      },
+    );
+  }
 }
