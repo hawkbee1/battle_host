@@ -98,6 +98,38 @@ void main() {
       expect(section.lockedUntil, isNull);
     });
 
+    test('a unit set up with a weapon starts with it ready; a section keeps '
+        "its player's medals (SOC-29)", () {
+      final battle = start(
+        BattleSetup(
+          battleId: 'b',
+          mapId: 'valley',
+          seed: 1,
+          settings: planData.battle,
+          teams: const [
+            TeamSetup(
+              id: 'red',
+              sections: [
+                SectionSetup(
+                  id: 's-1',
+                  accountId: 'a',
+                  medals: {'gold': 2},
+                  units: [
+                    UnitSetup(id: 'u', type: 'soldier', weapon: 'machine_gun'),
+                  ],
+                ),
+              ],
+            ),
+            TeamSetup(id: 'blue', sections: []),
+          ],
+        ),
+      );
+
+      final weapon = battle.state.units['u']!.weapon;
+      expect((weapon.weapon!.id, weapon.rounds), equals(('machine_gun', 100)));
+      expect(battle.state.sections['s-1']!.medals, equals({'gold': 2}));
+    });
+
     test('decision 172 plays with its own settings, checked against the '
         'shared definitions', () {
       final settings = BattleSettings.parse(
@@ -153,6 +185,14 @@ void main() {
 
       expect(
         () => start(withUnits(const [UnitSetup(id: 'u', type: 'dragon')])),
+        throwsArgumentError,
+      );
+      expect(
+        () => start(
+          withUnits(const [
+            UnitSetup(id: 'u', type: 'soldier', weapon: 'catapult'),
+          ]),
+        ),
         throwsArgumentError,
       );
       expect(
