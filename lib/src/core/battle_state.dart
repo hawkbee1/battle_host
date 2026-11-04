@@ -58,6 +58,7 @@ final class UnitState {
     this.movingUntil,
     this.work,
     this.observation,
+    this.xpHistory,
   });
 
   /// The unit.
@@ -107,13 +108,20 @@ final class UnitState {
   final Observation? observation;
 
   /// Whether it is on the field: deployed or carried.
+  /// Its recent XP awards, for the repeats that shrink (UNIT-10); null
+  /// before its first award.
+  final XpHistory? xpHistory;
+
   bool get onField => location is OnField;
 
   /// This unit with the values given changed; [clearCell], [clearMove],
   /// [clearWork] remove those.
   UnitState copyWith({
     String? sectionId,
+    UnitType? type,
+    SkillTree? tree,
     UnitXp? xp,
+    XpHistory? xpHistory,
     UnitLocation? location,
     ApPool? pool,
     Health? health,
@@ -127,12 +135,14 @@ final class UnitState {
     bool clearCell = false,
     bool clearMove = false,
     bool clearWork = false,
+    bool clearObservation = false,
   }) => UnitState(
     id: id,
     sectionId: sectionId ?? this.sectionId,
-    type: type,
-    tree: tree,
+    type: type ?? this.type,
+    tree: tree ?? this.tree,
     xp: xp ?? this.xp,
+    xpHistory: xpHistory ?? this.xpHistory,
     location: location ?? this.location,
     pool: pool ?? this.pool,
     health: health ?? this.health,
@@ -142,14 +152,14 @@ final class UnitState {
     flying: flying ?? this.flying,
     movingUntil: clearMove ? null : movingUntil ?? this.movingUntil,
     work: clearWork ? null : work ?? this.work,
-    observation: observation ?? this.observation,
+    observation: clearObservation ? null : observation ?? this.observation,
   );
 }
 
 /// {@template section_state}
-/// A section in the battle: its commander's account, its team, its money,
-/// its section XP, its spare weapons (decision 151) and the end of its
-/// full storage lock (HQ-35), if any.
+/// A section in the battle: its commander's account, its team, its guild
+/// and role there, its money, its section XP, its spare weapons
+/// (decision 151) and the end of its full storage lock (HQ-35), if any.
 /// {@endtemplate}
 final class SectionState {
   /// {@macro section_state}
@@ -160,12 +170,20 @@ final class SectionState {
     required this.money,
     required this.xp,
     this.medals = const {},
+    this.guildId,
+    this.guildChief = false,
     this.storedWeapons = const StoredWeapons([]),
     this.lockedUntil,
   });
 
   /// The section.
   final String id;
+
+  /// Its guild; null without one.
+  final String? guildId;
+
+  /// Whether its player is the guild's chief (SOC-50).
+  final bool guildChief;
 
   /// Its commander's account.
   final String accountId;
@@ -189,27 +207,32 @@ final class SectionState {
   final Duration? lockedUntil;
 
   /// This section with its lock set to [until], or lifted when null.
-  SectionState lockedTo(Duration? until) => SectionState(
-    id: id,
-    accountId: accountId,
-    team: team,
-    money: money,
-    xp: xp,
-    medals: medals,
-    storedWeapons: storedWeapons,
-    lockedUntil: until,
-  );
+  SectionState lockedTo(Duration? until) => _copy(lockedUntil: () => until);
 
   /// This section with [weapons] as its spare weapons.
-  SectionState withWeapons(StoredWeapons weapons) => SectionState(
+  SectionState withWeapons(StoredWeapons weapons) =>
+      _copy(storedWeapons: weapons);
+
+  /// This section with [money] w€ and [xp] section XP.
+  SectionState withWallet({int? money, double? xp}) =>
+      _copy(money: money, xp: xp);
+
+  SectionState _copy({
+    int? money,
+    double? xp,
+    StoredWeapons? storedWeapons,
+    Duration? Function()? lockedUntil,
+  }) => SectionState(
     id: id,
     accountId: accountId,
     team: team,
-    money: money,
-    xp: xp,
+    money: money ?? this.money,
+    xp: xp ?? this.xp,
     medals: medals,
-    storedWeapons: weapons,
-    lockedUntil: lockedUntil,
+    guildId: guildId,
+    guildChief: guildChief,
+    storedWeapons: storedWeapons ?? this.storedWeapons,
+    lockedUntil: lockedUntil == null ? this.lockedUntil : lockedUntil(),
   );
 }
 
@@ -361,6 +384,7 @@ final class BattleState {
     required this.weather,
     this.dropped = const {},
     this.structures = const {},
+    this.offers = const {},
   });
 
   /// The units, by ID.
@@ -384,6 +408,18 @@ final class BattleState {
   /// The structures built in the battle, by site ID: their type and cells.
   /// The world delta layer applies them to paths and sight (M5.14).
   final Map<String, (String, List<CellRef>)> structures;
+
+  /// The prisoner offers waiting for an answer, by offer id: the sequence
+  /// number of the order that posted it (COMBAT-44).
+  final Map<int, PrisonerOffer> offers;
+
+  /// The prisoners [captor] holds, with their owners (COMBAT-43).
+  PrisonerStorage prisonersOf(String captor) => PrisonerStorage({
+    for (final unit in units.values)
+      if (unit.location case Prisoner(:final captorSectionId)
+          when captorSectionId == captor)
+        unit.id: unit.sectionId,
+  });
 
   /// This state with [unit] in place of the unit of its ID.
   BattleState withUnit(UnitState unit) =>
@@ -417,6 +453,14 @@ final class BattleState {
   BattleState withStructure(String siteId, String type, List<CellRef> cells) =>
       _with(structures: {...structures, siteId: (type, cells)});
 
+  /// This state with [offer] waiting as [offerId].
+  BattleState withOffer(int offerId, PrisonerOffer offer) =>
+      _with(offers: {...offers, offerId: offer});
+
+  /// This state without the offer [offerId].
+  BattleState withoutOffer(int offerId) =>
+      _with(offers: {...offers}..remove(offerId));
+
   BattleState _with({
     Map<String, UnitState>? units,
     Map<String, SectionState>? sections,
@@ -424,6 +468,7 @@ final class BattleState {
     Map<String, RelicState>? relics,
     Map<String, DroppedWeaponState>? dropped,
     Map<String, (String, List<CellRef>)>? structures,
+    Map<int, PrisonerOffer>? offers,
   }) => BattleState(
     units: units == null ? this.units : Map.unmodifiable(units),
     sections: sections == null ? this.sections : Map.unmodifiable(sections),
@@ -434,5 +479,6 @@ final class BattleState {
     structures: structures == null
         ? this.structures
         : Map.unmodifiable(structures),
+    offers: offers == null ? this.offers : Map.unmodifiable(offers),
   );
 }

@@ -21,6 +21,8 @@ export 'src/orders/command_sinks.dart';
 export 'src/orders/order_chain.dart';
 export 'src/orders/rate_limit.dart';
 export 'src/orders/refusal.dart';
+export 'src/orders/rewards.dart';
+export 'src/orders/section_orders.dart';
 export 'src/orders/world.dart';
 export 'src/ports/clock.dart';
 export 'src/ports/error_reporter.dart';

@@ -150,26 +150,6 @@ void main() {
       );
     });
 
-    test('refuses the orders of the later parts of the host', () {
-      for (final order in const <Order>[
-        Store(unitId: 'soldier-1'),
-        Recall(unitId: 'soldier-1'),
-        Deploy(unitId: 'soldier-1'),
-        BuyNode(unitId: 'soldier-1', stat: 'hp', step: 1),
-        BuyUnit(unitType: 'soldier'),
-        BuyWeapon(weapon: 'rifle'),
-        BuyGuildCamp(),
-        TransferMoney(toSectionId: 's-2', amount: 10),
-        OfferExchange(ownerSectionId: 's-2', released: [], wanted: []),
-        OfferRansom(ownerSectionId: 's-2', released: [], price: 1),
-        AcceptOffer(offerId: 1),
-        RefuseOffer(offerId: 1),
-        DelegateHq(accountId: 'a-2'),
-      ]) {
-        expectRefused(order, CheckLink.rules, 'not_available_yet');
-      }
-    });
-
     test('refuses at the rules link what a rule refuses', () {
       expectRefused(
         const Reload(unitId: 'radio-1'),

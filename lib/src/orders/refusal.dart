@@ -154,3 +154,120 @@ final class ApRefused extends OrderRefusal {
   @override
   String get code => 'cost_above_ap_max';
 }
+
+/// The host's own reasons to refuse an order, beside those of the rules
+/// core.
+enum HostRule {
+  /// The position or cell is off the map.
+  offMap,
+
+  /// No path reaches the goal.
+  noPath,
+
+  /// The client's path does not start where the mover stands.
+  pathNotFromMover,
+
+  /// A carried unit does not move on its own.
+  carried,
+
+  /// Its loaded weapon forbids moving (`move_while_loaded`).
+  weaponLoaded,
+
+  /// A scout cannot move while it observes (UNIT-34).
+  observing,
+
+  /// The battle has no such target.
+  unknownTarget,
+
+  /// The target is out of the weapon's range.
+  outOfRange,
+
+  /// The unit does not see its target itself (COMBAT-11).
+  targetNotSeen,
+
+  /// The weapon cannot hit a flying target (COMBAT-25).
+  cannotHitFlying,
+
+  /// The weapon does not fire at a position (COMBAT-12, COMBAT-55).
+  notIndirect,
+
+  /// Nobody of the section sees the position and no scout reports it
+  /// through a radio (COMBAT-12).
+  positionNotSeen,
+
+  /// The weapon is not aimed in first person (decision 183).
+  notAimed,
+
+  /// The battle has no such dropped weapon.
+  unknownDropped,
+
+  /// The unit is not where the weapon lies (COMBAT-30).
+  notOnTheSpot,
+
+  /// The unit cannot fly.
+  cannotFly,
+
+  /// It is not flying.
+  notFlying,
+
+  /// It is flying already.
+  alreadyFlying,
+
+  /// The target is not a transport.
+  notATransport,
+
+  /// The unit cannot be carried (UNIT-36: radios).
+  notTransportable,
+
+  /// The unit weighs more than the transport takes per unit (UNIT-37).
+  tooHeavy,
+
+  /// The transport carries all the weight it can (UNIT-37).
+  transportFull,
+
+  /// The unit is not carried.
+  notCarried,
+
+  /// The transport is flying.
+  transportFlying,
+
+  /// The transport is recalled: it takes no passengers (HQ-49).
+  transportRecalled,
+
+  /// The unit is not within the storage radius of its storage place
+  /// (HQ-31): a recall stores it from anywhere.
+  notAtStorage,
+
+  /// The battle has no unit type, weapon type or stat of that name.
+  unknownType,
+
+  /// The battle has no such section.
+  unknownSection,
+
+  /// A section does not send money or offers to itself.
+  toItself,
+
+  /// The battle has no such offer waiting.
+  unknownOffer,
+
+  /// Only the owner of the prisoners answers an offer (COMBAT-44).
+  notYourOffer,
+
+  /// A prisoner buys nothing and is not deployed (COMBAT-43).
+  isPrisoner,
+
+  /// The target is further than the unit reaches.
+  tooFar,
+
+  /// An encampment never goes onto a floating island (MAP-38).
+  islandUnreachable,
+
+  /// No interrupted build or repair has that ID.
+  unknownWork,
+
+  /// The battle has no such relic.
+  unknownRelic,
+
+  /// The team owns the relic already.
+  alreadyOwned,
+}

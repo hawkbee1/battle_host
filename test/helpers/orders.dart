@@ -6,8 +6,9 @@ import 'package:test/test.dart';
 
 import 'fixtures.dart';
 
-/// Two teams on the valley. Team 1 (`s-1` of `a-1`) has one unit of most
-/// types; team 2 (`s-2` of `a-2`) has a commander and two soldiers.
+/// Two teams on the valley. Team 1 (`s-1` of `a-1`, 1000 w€) has one unit
+/// of most types; team 2 (`s-2` of `a-2`, no money) has a commander and two
+/// soldiers.
 /// `soldier-4`, `soldier-5` and the guild camp `camp-1` stay in storage.
 BattleSetup ordersSetup({int seed = 11}) => BattleSetup(
   battleId: 'b-1',
@@ -21,6 +22,7 @@ BattleSetup ordersSetup({int seed = 11}) => BattleSetup(
         SectionSetup(
           id: 's-1',
           accountId: 'a-1',
+          money: 1000,
           units: [
             UnitSetup(id: 'commander-1', type: 'commander'),
             UnitSetup(id: 'soldier-1', type: 'soldier'),
@@ -186,13 +188,30 @@ String fingerprint(BattleState state) {
         unit.weapon.busyUntil,
         unit.weapon.nextShotAt,
         unit.flying,
+        unit.xp.earned,
+        unit.xp.unspent,
+        unit.xpHistory?.awards.length,
+        unit.tree.steps,
+        unit.type.stats.hp,
+        switch (unit.location) {
+          OnField(:final recallDoneAt) => recallDoneAt,
+          Prisoner(:final captorSectionId) => captorSectionId,
+          Stored() => null,
+        },
         unit.movingUntil,
         unit.work?.workId,
         unit.work?.action.progress,
         unit.observation?.startedAt,
       ].join(' '),
     for (final section in state.sections.values)
-      '${section.id} ${section.storedWeapons.weapons} ${section.lockedUntil}',
+      [
+        section.id,
+        section.money,
+        section.xp,
+        section.storedWeapons.weapons,
+        section.lockedUntil,
+      ].join(' '),
+    'offers ${state.offers.keys}',
     for (final team in state.teams.values)
       [
         team.id,

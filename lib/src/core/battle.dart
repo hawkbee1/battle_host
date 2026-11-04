@@ -46,6 +46,18 @@ final class WorkEnds extends BattleTimer {
   final String unitId;
 }
 
+/// {@template recall_ends}
+/// The recall of [unitId] ends: it is stored, unless it left the field
+/// since (HQ-32).
+/// {@endtemplate}
+final class RecallEnds extends BattleTimer {
+  /// {@macro recall_ends}
+  const new(this.unitId);
+
+  /// The unit.
+  final String unitId;
+}
+
 /// {@template flight_ends}
 /// The landing or take-off of [unitId] ends: it [flying] or not.
 /// {@endtemplate}
@@ -122,6 +134,8 @@ final class Battle {
           money: section.money,
           xp: section.xp,
           medals: section.medals,
+          guildId: section.guildId,
+          guildChief: section.guildChief,
         );
         for (final unit in section.units) {
           _unique(units, unit.id, 'unit');
@@ -162,6 +176,8 @@ final class Battle {
       definitions: definitions,
       settings: settings,
       random: XorshiftRandom(setup.seed),
+      minStartingMoney:
+          setup.minStartingMoney ?? definitions.economy.minStartingMoney,
       state: BattleState(
         weather: settings.weather.states.first,
         units: Map.unmodifiable(units),
@@ -184,6 +200,7 @@ final class Battle {
     required this.definitions,
     required this.settings,
     required this.random,
+    required this.minStartingMoney,
     required this._state,
   });
 
@@ -207,6 +224,9 @@ final class Battle {
 
   /// Its seeded random (stack decision 1).
   final SeededRandom random;
+
+  /// The money floor of its war's sections (SOC-10, ECO-13).
+  final int minStartingMoney;
 
   BattleState _state;
   Duration _time = Duration.zero;
@@ -272,6 +292,7 @@ final class Battle {
   }
 
   void _fire(BattleTimer timer) {
+    final before = _state;
     final events = switch (timer) {
       SectionUnlocks(:final sectionId) => () {
         _state = _state.withSection(
@@ -281,8 +302,16 @@ final class Battle {
         );
         return const <BattleEvent>[];
       }(),
+      // A waiting order hears its own consequences in the handler.
       RunOrder(:final command) => orders.handle(command).events,
-      WorkEnds(:final unitId) => orders.finishWork(unitId),
+      WorkEnds(:final unitId) => orders.react(
+        before,
+        orders.finishWork(unitId),
+      ),
+      RecallEnds(:final unitId) => orders.react(
+        before,
+        orders.sections.finishRecall(unitId),
+      ),
       FlightEnds(:final unitId, :final flying) => orders.finishFlight(
         unitId,
         flying: flying,
