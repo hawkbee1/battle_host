@@ -12,6 +12,7 @@ final class UnitSetup {
     required this.type,
     this.tree,
     this.xp = const UnitXp(),
+    this.weapon,
   });
 
   /// The unit.
@@ -25,12 +26,17 @@ final class UnitSetup {
 
   /// Its XP.
   final UnitXp xp;
+
+  /// Its weapon type, kept from the battles before (UNIT-30); null for its
+  /// type's default weapon (COMBAT-27).
+  final String? weapon;
 }
 
 /// {@template section_setup}
 /// A section in a battle: its [id], its commander's [accountId], its
 /// [money], its section [xp] and its [units], kept between the battles of
-/// a war (UNIT-30).
+/// a war (UNIT-30), and the [medals] its player holds, which rank him for
+/// the HQ manager role (SOC-29).
 /// {@endtemplate}
 final class SectionSetup {
   /// {@macro section_setup}
@@ -40,10 +46,14 @@ final class SectionSetup {
     required this.units,
     this.money = 0,
     this.xp = 0,
+    this.medals = const {},
   });
 
   /// The section.
   final String id;
+
+  /// The medals its player holds, by tier (`medals.yaml` `tiers`).
+  final Map<String, int> medals;
 
   /// Its commander's account.
   final String accountId;

@@ -2,6 +2,8 @@ import 'package:battle_host/src/core/battle_setup.dart';
 import 'package:battle_host/src/core/battle_state.dart';
 import 'package:battle_host/src/core/shared_map.dart';
 import 'package:battle_host/src/core/timer_queue.dart';
+import 'package:battle_host/src/orders/command_handler.dart';
+import 'package:battle_protocol/battle_protocol.dart';
 import 'package:battle_rules/battle_rules.dart';
 
 /// Something a battle must do at a set time.
@@ -18,6 +20,44 @@ final class SectionUnlocks extends BattleTimer {
 
   /// The section.
   final String sectionId;
+}
+
+/// {@template run_order}
+/// The wait of [command] for AP or its weapon ends: it is checked again on
+/// the state of that time, then carried out or refused (COMBAT-06,
+/// deferred from M4.11).
+/// {@endtemplate}
+final class RunOrder extends BattleTimer {
+  /// {@macro run_order}
+  const new(this.command);
+
+  /// The waiting command.
+  final Command command;
+}
+
+/// {@template work_ends}
+/// The build or repair of [unitId] ends (COMBAT-07).
+/// {@endtemplate}
+final class WorkEnds extends BattleTimer {
+  /// {@macro work_ends}
+  const new(this.unitId);
+
+  /// The unit.
+  final String unitId;
+}
+
+/// {@template flight_ends}
+/// The landing or take-off of [unitId] ends: it [flying] or not.
+/// {@endtemplate}
+final class FlightEnds extends BattleTimer {
+  /// {@macro flight_ends}
+  const new(this.unitId, {required this.flying});
+
+  /// The unit.
+  final String unitId;
+
+  /// Whether it flies once done.
+  final bool flying;
 }
 
 /// {@template battle}
@@ -81,6 +121,7 @@ final class Battle {
           team: team.id,
           money: section.money,
           xp: section.xp,
+          medals: section.medals,
         );
         for (final unit in section.units) {
           _unique(units, unit.id, 'unit');
@@ -90,6 +131,16 @@ final class Battle {
           final tree = unit.tree ?? SkillTree();
           final type = evolution.evolve(base, tree);
           final start = war.atBattleStart(type);
+          final weapon = unit.weapon == null
+              ? WeaponState.forNewUnit(type, definitions.combat)
+              : WeaponState.ready(
+                  definitions.combat.weaponTypes[unit.weapon] ??
+                      (throw ArgumentError.value(
+                        unit.weapon,
+                        'weapon',
+                        'no such weapon',
+                      )),
+                );
           units[unit.id] = UnitState(
             id: unit.id,
             sectionId: section.id,
@@ -100,6 +151,7 @@ final class Battle {
             pool: start.pool,
             health: start.health,
             morale: start.morale,
+            weapon: weapon,
           );
         }
       }
@@ -111,6 +163,7 @@ final class Battle {
       settings: settings,
       random: XorshiftRandom(setup.seed),
       state: BattleState(
+        weather: settings.weather.states.first,
         units: Map.unmodifiable(units),
         sections: Map.unmodifiable(sections),
         teams: Map.unmodifiable(teams),
@@ -157,6 +210,18 @@ final class Battle {
 
   BattleState _state;
   Duration _time = Duration.zero;
+  var _nextSeq = 1;
+
+  /// The command handler of this battle (Facade for every sender).
+  late final CommandHandler orders = CommandHandler(this);
+
+  /// Hears the events the battle makes on its own, at their time (a
+  /// waiting order carried out, a work done): the host logs them
+  /// (Observer, stack decision 7).
+  void Function(Duration at, List<BattleEvent> events)? onEvents;
+
+  /// The next sequence number of an accepted command (stack decision 8).
+  int takeSeq() => _nextSeq++;
   final _timers = TimerQueue<BattleTimer>();
   var _fired = 0;
 
@@ -206,11 +271,23 @@ final class Battle {
     _time = to;
   }
 
-  void _fire(BattleTimer timer) => switch (timer) {
-    SectionUnlocks(:final sectionId) => _state = _state.withSection(
-      (_state.sections[sectionId] ??
-              (throw StateError('no section $sectionId to unlock')))
-          .lockedTo(null),
-    ),
-  };
+  void _fire(BattleTimer timer) {
+    final events = switch (timer) {
+      SectionUnlocks(:final sectionId) => () {
+        _state = _state.withSection(
+          (_state.sections[sectionId] ??
+                  (throw StateError('no section $sectionId to unlock')))
+              .lockedTo(null),
+        );
+        return const <BattleEvent>[];
+      }(),
+      RunOrder(:final command) => orders.handle(command).events,
+      WorkEnds(:final unitId) => orders.finishWork(unitId),
+      FlightEnds(:final unitId, :final flying) => orders.finishFlight(
+        unitId,
+        flying: flying,
+      ),
+    };
+    if (events.isNotEmpty) onEvents?.call(_time, events);
+  }
 }
