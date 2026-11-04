@@ -105,11 +105,7 @@ final class Relics implements BattleListener {
     }
     final mover = Mover.relic(battle.definitions.combat.push);
     final pathMover = PathMover(apPerM: mover.apPerM, modes: mover.modes);
-    final checked = Pathfinder(
-      map: battle.map.host.navigation,
-      cost: battle.map.cost,
-      rules: battle.map.rules,
-    ).check(mover: pathMover, path: path);
+    final checked = battle.world.paths.check(mover: pathMover, path: path);
     // RELIC-28: a relic with no path stays stuck.
     if (checked is! PathPasses) return const [];
     final landing = checked.falls.firstOrNull;

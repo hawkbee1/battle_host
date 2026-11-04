@@ -6,6 +6,7 @@ import 'package:battle_host/src/orders/relics.dart';
 import 'package:battle_host/src/orders/rewards.dart';
 import 'package:battle_host/src/orders/section_orders.dart';
 import 'package:battle_host/src/orders/world.dart';
+import 'package:battle_host/src/orders/world_changes.dart';
 import 'package:battle_pathfinding/battle_pathfinding.dart' hide PathSample;
 import 'package:battle_pathfinding/battle_pathfinding.dart'
     as nav
@@ -36,7 +37,7 @@ final class CommandHandler {
   new(this.battle)
     : _combat = battle.definitions.combat,
       _terrain = battle.definitions.terrain,
-      world = World(map: battle.map, terrain: battle.definitions.terrain);
+      world = World(battle: battle.world, terrain: battle.definitions.terrain);
 
   /// The battle.
   final Battle battle;
@@ -101,6 +102,13 @@ final class CommandHandler {
 
   /// Relics, eliminations and the end of the battle.
   late final relics = Relics(battle: battle, world: world, orders: this);
+
+  /// The world's changes: constructions, damaged objects, craters.
+  late final worlds = WorldChanges(
+    battle: battle,
+    world: world,
+    relics: relics,
+  );
 
   late final _listeners = <BattleListener>[
     relics,
@@ -297,11 +305,7 @@ final class CommandHandler {
   /// client's [path] checked cell by cell, or one searched; a refusal
   /// otherwise.
   Object _route(PathMover mover, CellRef from, CellRef goal, List<Cell>? path) {
-    final finder = Pathfinder(
-      map: battle.map.host.navigation,
-      cost: battle.map.cost,
-      rules: battle.map.rules,
-    );
+    final finder = battle.world.paths;
     final List<CellRef> route;
     final List<nav.PathSample> samples;
     final List<CellRef> falls;
@@ -323,9 +327,9 @@ final class CommandHandler {
       final onGround =
           from.surface == groundSurface &&
           goal.surface == groundSurface &&
-          !mover.modes.contains(battle.map.rules.flyingMode);
+          !mover.modes.contains(battle.world.rules.flyingMode);
       final found = onGround
-          ? battle.map.searchFor(mover).fast(from, goal)
+          ? battle.world.searchFor(mover).fast(from, goal)
           : finder.find(mover: mover, from: from, to: goal);
       if (found == null) return refused(HostRule.noPath);
       route = found.cells;
@@ -450,11 +454,7 @@ final class CommandHandler {
   /// The distance along [cells], a path [mover] passes, at which it
   /// reaches each of them: a step gives several samples, a fall none.
   List<double> alongOf(PathMover mover, List<CellRef> cells) {
-    final finder = Pathfinder(
-      map: battle.map.host.navigation,
-      cost: battle.map.cost,
-      rules: battle.map.rules,
-    );
+    final finder = battle.world.paths;
     final along = <double>[0];
     for (var i = 1; i < cells.length; i++) {
       final step = finder.check(mover: mover, path: [cells[i - 1], cells[i]]);
@@ -760,9 +760,7 @@ final class CommandHandler {
     _put(unit.copyWith(clearWork: true));
     final structure = work.structure;
     if (structure != null) {
-      battle.change(
-        (state) => state.withStructure(work.workId, structure, work.cells),
-      );
+      worlds.built(work.workId, structure, work.cells);
       return [
         StructureBuilt(
           siteId: work.workId,
@@ -1259,6 +1257,7 @@ final class CommandHandler {
           impacts.add(_hurt(shooter, _state.units[victim.id]!, amount, seq));
         }
       }
+      _pending.addAll(worlds.bombard(weapon, landed));
       return (roll.hits, impacts);
     });
   }
@@ -1309,7 +1308,11 @@ final class CommandHandler {
           true,
           _hit(shooter, targetId, _damageTo(weapon, targetId, shooter), seq),
         ),
-        ShotHitsObstacle() || ShotMisses() => (false, const <Impact>[]),
+        ShotHitsObstacle(:final point) => () {
+          _pending.addAll(worlds.obstacleHit(weapon, point));
+          return (false, const <Impact>[]);
+        }(),
+        ShotMisses() => (false, const <Impact>[]),
       };
     });
   }

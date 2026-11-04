@@ -1,3 +1,4 @@
+import 'package:battle_host/src/core/battle_world.dart';
 import 'package:battle_pathfinding/battle_pathfinding.dart';
 import 'package:battle_rules/battle_rules.dart';
 
@@ -455,7 +456,7 @@ final class BattleState {
     required this.relics,
     required this.weather,
     this.dropped = const {},
-    this.structures = const {},
+    this.delta = const WorldDelta(),
     this.offers = const {},
     this.victory,
     this.eliminated = const [],
@@ -479,9 +480,8 @@ final class BattleState {
   /// The weapons on the ground, by ID.
   final Map<String, DroppedWeaponState> dropped;
 
-  /// The structures built in the battle, by site ID: their type and cells.
-  /// The world delta layer applies them to paths and sight (M5.14).
-  final Map<String, (String, List<CellRef>)> structures;
+  /// The world's delta layer (MAP-06).
+  final WorldDelta delta;
 
   /// Relic owners, the teams still in, the running hold and the winner
   /// (RELIC-14, HQ-45); null only for a state built by hand.
@@ -533,9 +533,8 @@ final class BattleState {
   BattleState withoutDropped(String id) =>
       _with(dropped: {...dropped}..remove(id));
 
-  /// This state with the structure [type] built on [cells] as [siteId].
-  BattleState withStructure(String siteId, String type, List<CellRef> cells) =>
-      _with(structures: {...structures, siteId: (type, cells)});
+  /// This state with [delta] as its delta layer.
+  BattleState withDelta(WorldDelta delta) => _with(delta: delta);
 
   /// This state without the relic [relicId], which left the battle
   /// (RELIC-26).
@@ -561,7 +560,7 @@ final class BattleState {
     Map<String, TeamState>? teams,
     Map<String, RelicState>? relics,
     Map<String, DroppedWeaponState>? dropped,
-    Map<String, (String, List<CellRef>)>? structures,
+    WorldDelta? delta,
     Map<int, PrisonerOffer>? offers,
     VictoryState? victory,
     List<String>? eliminated,
@@ -572,9 +571,7 @@ final class BattleState {
     relics: relics == null ? this.relics : Map.unmodifiable(relics),
     weather: weather,
     dropped: dropped == null ? this.dropped : Map.unmodifiable(dropped),
-    structures: structures == null
-        ? this.structures
-        : Map.unmodifiable(structures),
+    delta: delta ?? this.delta,
     offers: offers == null ? this.offers : Map.unmodifiable(offers),
     victory: victory ?? this.victory,
     eliminated: eliminated == null

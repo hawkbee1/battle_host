@@ -596,16 +596,16 @@ void main() {
       place('soldier-1', const CellRef(7, 2));
       place('soldier-2', const CellRef(9, 2));
       f.wait(const Duration(seconds: 2));
-      final wall =
-          eventsOf(
-                FireAimed(
-                  unitId: 'soldier-1',
-                  aim: Direction.of(1, 0, 0),
-                  fireTime: f.battle.time,
-                ),
-              ).single
-              as Attacked;
-      expect(wall.hit, isFalse);
+      final events = eventsOf(
+        FireAimed(
+          unitId: 'soldier-1',
+          aim: Direction.of(1, 0, 0),
+          fireTime: f.battle.time,
+        ),
+      );
+      expect((events.first as Attacked).hit, isFalse);
+      // MAP-10: the building that stopped the shot takes its hit.
+      expect((events.last as ObjectDamaged).object, equals('building'));
     });
 
     group('COMBAT-38 the final blow of a commander', () {
@@ -1076,7 +1076,7 @@ void main() {
           ),
         ]),
       );
-      expect(f.battle.state.structures, contains('wall@(3, 4)'));
+      expect(f.battle.state.delta.built, contains('wall@(3, 4)'));
       expect(f.unit('engineer-1').work, isNull);
     });
 

@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:battle_host/src/core/shared_map.dart';
+import 'package:battle_host/src/core/battle_world.dart';
 import 'package:battle_pathfinding/battle_pathfinding.dart';
 import 'package:battle_protocol/battle_protocol.dart' as wire;
 import 'package:battle_rules/battle_rules.dart';
@@ -16,15 +16,15 @@ import 'package:battle_rules/battle_rules.dart';
 /// {@endtemplate}
 final class World implements ObstacleQuery {
   /// {@macro world}
-  new({required this.map, required this.terrain});
+  new({required this.battle, required this.terrain});
 
-  /// The shared map.
-  final SharedMap map;
+  /// The battle's world, changes included.
+  final BattleWorld battle;
 
   /// The terrain data.
   final TerrainData terrain;
 
-  NavigationMap get _nav => map.host.navigation;
+  NavigationMap get _nav => battle.navigation;
 
   /// The side of a cell, in metres.
   double get cellSizeM => _nav.cellSizeM;
@@ -58,7 +58,7 @@ final class World implements ObstacleQuery {
   Vec3 pointOf(CellRef cell, {bool flying = false}) => Vec3(
     (cell.x + 0.5) * cellSizeM,
     (cell.y + 0.5) * cellSizeM,
-    flying ? map.rules.altitudeLimitM : _nav.cellAt(cell)!.height,
+    flying ? battle.rules.altitudeLimitM : _nav.cellAt(cell)!.height,
   );
 
   /// The horizontal distance between the centres of [a] and [b], in
@@ -73,12 +73,22 @@ final class World implements ObstacleQuery {
   Set<String> objectsOn(CellRef cell) => _nav.objectsAt(cell);
 
   /// Whether a target on [cell] has partial cover: an object that conceals
-  /// it, a tree (COMBAT-53). Under orders, full cover is never given: it
-  /// would leave the 5 % minimum anyway (decision 135).
+  /// it, a tree, or a crater it stands in (COMBAT-53, MAP-07). Under
+  /// orders, full cover is never given: it would leave the 5 % minimum
+  /// anyway (decision 135).
   Cover coverOn(CellRef cell) =>
-      objectsOn(cell).any((object) => terrain.objects[object]?.conceals != null)
+      objectsOn(cell)
+              .any((object) => terrain.objects[object]?.conceals != null) ||
+          _inCrater(cell)
       ? Cover.partial
       : Cover.none;
+
+  /// Whether [cell] is dug by a crater: craters dig the ground only
+  /// (MAP-46).
+  bool _inCrater(CellRef cell) =>
+      cell.surface == groundSurface &&
+      _nav.cellAt(cell)!.height <
+          _nav.ground[cell.y * _nav.width + cell.x].height;
 
   /// The sight line from [from] to [to] (MAP-29): its length, the
   /// observer's terrain and height above the target, and, between the two

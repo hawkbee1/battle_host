@@ -1,5 +1,6 @@
 import 'package:battle_host/src/core/battle_setup.dart';
 import 'package:battle_host/src/core/battle_state.dart';
+import 'package:battle_host/src/core/battle_world.dart';
 import 'package:battle_host/src/core/shared_map.dart';
 import 'package:battle_host/src/core/timer_queue.dart';
 import 'package:battle_host/src/orders/command_handler.dart';
@@ -269,6 +270,9 @@ final class Battle {
   BattleState _state;
   Duration _time = Duration.zero;
   var _nextSeq = 1;
+
+  /// Its own world: the shared map until it first changes (M5.14).
+  late final BattleWorld world = BattleWorld(map);
 
   /// The command handler of this battle (Facade for every sender).
   late final CommandHandler orders = CommandHandler(this);

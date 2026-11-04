@@ -241,8 +241,11 @@ String fingerprint(BattleState state) {
       ].join(' '),
     for (final dropped in state.dropped.values)
       '${dropped.id} ${dropped.dropped.weapon.id} ${dropped.cell}',
-    for (final MapEntry(:key, :value) in state.structures.entries)
-      '$key ${value.$1} ${value.$2}',
+    for (final object in state.delta.built.values)
+      'built ${object.id} ${object.kind} ${object.cells}',
+    'changes ${[for (final change in state.delta.changes) change.runtimeType]}',
+    'hp ${state.delta.hp}',
+    'destroyed ${state.delta.destroyed}',
   ];
   return lines.join('\n');
 }
