@@ -90,6 +90,7 @@ void main() {
       expect(reporter.reports, hasLength(1));
       expect(reporter.reports.single.$1, isA<StateError>());
       expect(reporter.reports.single.$2, equals('b-1'));
+      expect(() => host.start(valleySetup()), throwsArgumentError);
     });
   });
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:battle_host/battle_host.dart';
 import 'package:battle_pathfinding/battle_pathfinding.dart';
 import 'package:battle_protocol/battle_protocol.dart';
@@ -100,7 +102,7 @@ final class OrdersFixture {
       ),
       definitions: planData,
       reporter: RecordingErrorReporter(),
-      log: log,
+      wal: wal,
       rateLimit: rateLimit ?? RateLimit(perSecond: 1000, burst: 1000),
     );
     battle = host.start(ordersSetup(seed: seed));
@@ -112,12 +114,12 @@ final class OrdersFixture {
   final int seed;
 
   final clock = ManualClock(DateTime.utc(2026, 11, 2, 8));
-  final log = MemoryLogSink();
+  final wal = MemoryWriteAheadLog();
   late final SimulationHost host;
   late final Battle battle;
 
   /// The battle's log.
-  List<LogEntry> get entries => log.logOf('b-1');
+  List<LogEntry> get entries => wal.read('b-1').entries;
 
   /// Sends [order] from [section] of [account], signed in as [origin].
   HandledOrder send(
@@ -168,91 +170,19 @@ Position centreOf(Battle battle, CellRef cell) {
   return Position.metres(point.x, point.y, point.z);
 }
 
-/// A description of everything [state] holds, to compare two states.
-String fingerprint(BattleState state) {
-  final lines = <String>[
-    'weather ${state.weather}',
-    for (final unit in state.units.values)
-      [
-        unit.id,
-        unit.sectionId,
-        unit.location.runtimeType,
-        unit.cell,
-        unit.pool.value,
-        unit.pool.updatedAt,
-        unit.health.current,
-        unit.morale,
-        unit.weapon.weapon?.id,
-        unit.weapon.rounds,
-        unit.weapon.loaded,
-        unit.weapon.busyUntil,
-        unit.weapon.nextShotAt,
-        unit.flying,
-        unit.xp.earned,
-        unit.xp.unspent,
-        unit.xpHistory?.awards.length,
-        unit.tree.steps,
-        unit.type.stats.hp,
-        switch (unit.location) {
-          OnField(:final recallDoneAt) => recallDoneAt,
-          Prisoner(:final captorSectionId) => captorSectionId,
-          Stored() => null,
-        },
-        unit.movingUntil,
-        unit.work?.workId,
-        unit.work?.action.progress,
-        unit.observation?.startedAt,
-      ].join(' '),
-    for (final section in state.sections.values)
-      [
-        section.id,
-        section.money,
-        section.xp,
-        section.storedWeapons.weapons,
-        section.lockedUntil,
-      ].join(' '),
-    'offers ${state.offers.keys}',
-    [
-      'victory',
-      state.victory?.relicOwners,
-      state.victory?.teams,
-      state.victory?.hold?.winsAt,
-      state.victory?.winner?.team,
-      state.eliminated,
-    ].join(' '),
-    for (final team in state.teams.values)
-      [
-        team.id,
-        team.hq.cell,
-        team.hq.health.current,
-        team.hq.pool.value,
-        team.hq.movingUntil,
-        team.managerAccountId,
-      ].join(' '),
-    for (final relic in state.relics.values)
-      [
-        relic.id,
-        relic.owner,
-        relic.capturePot?.contributions,
-        relic.pushPot?.ap,
-        relic.pushPath,
-        relic.pushers,
-        relic.push?.endsAt,
-      ].join(' '),
-    for (final dropped in state.dropped.values)
-      '${dropped.id} ${dropped.dropped.weapon.id} ${dropped.cell}',
-    for (final object in state.delta.built.values)
-      'built ${object.id} ${object.kind} ${object.cells}',
-    'changes ${[for (final change in state.delta.changes) change.runtimeType]}',
-    'hp ${state.delta.hp}',
-    'destroyed ${state.delta.destroyed}',
-  ];
-  return lines.join('\n');
-}
+/// Everything [battle] holds, as its snapshot writes it: its state, time,
+/// timers, random and sequence numbers.
+String snapshotOf(Battle battle) =>
+    utf8.decode(encodeSnapshot(battle.save(), startedAt: DateTime.utc(2026)));
+
+/// The state of [battle], as its snapshot writes it.
+String stateOf(Battle battle) => jsonEncode(
+  (jsonDecode(snapshotOf(battle)) as Map<String, Object?>)['state'],
+);
 
 /// Replays the log of [live] on a new battle of the same setup, deployed
 /// and changed by [prepare] as the live one was before its first order,
-/// and checks that it gives the same events and reaches the same state.
+/// and checks that it gives the same events and reaches the same battle.
 void expectReplay(OrdersFixture live, {void Function(Battle)? prepare}) {
   final battle = Battle.start(
     setup: ordersSetup(seed: live.seed),
@@ -261,27 +191,8 @@ void expectReplay(OrdersFixture live, {void Function(Battle)? prepare}) {
   );
   deploy(battle);
   prepare?.call(battle);
-  final own = <LogEntry>[];
-  battle.onEvents = (at, events) => own.add(LogEntry(at: at, events: events));
-  final replayed = <LogEntry>[];
-  for (final entry in live.entries) {
-    final command = entry.command;
-    if (command == null) continue;
-    battle.advanceTo(entry.at);
-    replayed
-      ..addAll(own)
-      ..add(
-        LogEntry(
-          at: entry.at,
-          command: command,
-          events: battle.orders.handle(command).events,
-        ),
-      );
-    own.clear();
-  }
+  replay(battle, live.entries, from: 0);
   battle.advanceTo(live.battle.time);
-  replayed.addAll(own);
 
-  expect(replayed, equals(live.entries));
-  expect(fingerprint(battle.state), equals(fingerprint(live.battle.state)));
+  expect(snapshotOf(battle), equals(snapshotOf(live.battle)));
 }

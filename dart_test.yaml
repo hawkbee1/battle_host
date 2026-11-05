@@ -1,0 +1,10 @@
+tags:
+  # The store contracts on the local Appwrite; skipped by default. Run them
+  # with the Very Good CLI MCP test tool (tags "appwrite", run_skipped true)
+  # and APPWRITE_API_KEY set; APPWRITE_ENDPOINT and APPWRITE_PROJECT_ID
+  # default to the local instance seen from the dev container.
+  appwrite:
+    skip: "Needs the local Appwrite; run with tags: appwrite and run_skipped."
+    timeout: 2m
+  # Keeps a file out of Very Good CLI's test merging (which drops tags).
+  skip_very_good_optimization:

@@ -105,6 +105,61 @@ final class FlightEnds extends BattleTimer {
   final bool flying;
 }
 
+/// {@template battle_memento}
+/// What a snapshot keeps of a battle (Memento, stack decision 7): enough to
+/// restore it on its map with the shared definitions. Only `Battle` makes
+/// one and reads one back; the host stores it encoded.
+/// {@endtemplate}
+final class BattleMemento {
+  /// {@macro battle_memento}
+  const new({
+    required this.battleId,
+    required this.mapId,
+    required this.settings,
+    required this.seed,
+    required this.randomState,
+    required this.minStartingMoney,
+    required this.state,
+    required this.time,
+    required this.nextSeq,
+    required this.timers,
+    required this.timersFired,
+  });
+
+  /// The battle.
+  final String battleId;
+
+  /// Its map.
+  final String mapId;
+
+  /// Its own settings (decision 172).
+  final BattleSettings settings;
+
+  /// The seed of its random.
+  final int seed;
+
+  /// The state of its random.
+  final List<int> randomState;
+
+  /// The money floor of its war's sections.
+  final int minStartingMoney;
+
+  /// Its state.
+  final BattleState state;
+
+  /// Its battle time.
+  final Duration time;
+
+  /// The sequence number of its next accepted command.
+  final int nextSeq;
+
+  /// Its timers, in the order they fire.
+  final List<(Duration, BattleTimer)> timers;
+
+  /// The timers it fired.
+  final int timersFired;
+}
+
 /// {@template battle}
 /// One battle in memory (decision 3) on a [map] it shares with the other
 /// battles of the process, with its own [settings] (decision 172) and its
@@ -233,6 +288,45 @@ final class Battle {
     );
   }
 
+  /// The battle [memento] holds, on [map], the map it names, with the
+  /// shared [definitions]: its world rebuilt from its delta layer, its
+  /// timers, its random and its sequence numbers where they were (Memento,
+  /// stack decisions 2 and 7). It goes on as the battle that was saved
+  /// would have.
+  ///
+  /// Throws an [ArgumentError] for a map that is not the one it names, and
+  /// a [GameDataException] for settings the definitions refuse.
+  factory restore(
+    BattleMemento memento, {
+    required SharedMap map,
+    required GameData definitions,
+  }) {
+    if (map.id != memento.mapId) {
+      throw ArgumentError.value(map.id, 'map', 'is not ${memento.mapId}');
+    }
+    final battle =
+        Battle._(
+            id: memento.battleId,
+            map: map,
+            definitions: definitions,
+            settings: definitions.checkSettings(memento.settings),
+            random: XorshiftRandom.resume(
+              seed: memento.seed,
+              state: memento.randomState,
+            ),
+            minStartingMoney: memento.minStartingMoney,
+            state: memento.state,
+          )
+          .._time = memento.time
+          .._nextSeq = memento.nextSeq
+          .._fired = memento.timersFired
+          .._world = BattleWorld.load(map, memento.state.delta);
+    for (final (at, timer) in memento.timers) {
+      battle._timers.schedule(at, timer);
+    }
+    return battle;
+  }
+
   new _({
     required this.id,
     required this.map,
@@ -262,7 +356,7 @@ final class Battle {
   final BattleSettings settings;
 
   /// Its seeded random (stack decision 1).
-  final SeededRandom random;
+  final XorshiftRandom random;
 
   /// The money floor of its war's sections (SOC-10, ECO-13).
   final int minStartingMoney;
@@ -271,8 +365,10 @@ final class Battle {
   Duration _time = Duration.zero;
   var _nextSeq = 1;
 
+  BattleWorld? _world;
+
   /// Its own world: the shared map until it first changes (M5.14).
-  late final BattleWorld world = BattleWorld(map);
+  BattleWorld get world => _world ??= BattleWorld(map);
 
   /// The command handler of this battle (Facade for every sender).
   late final CommandHandler orders = CommandHandler(this);
@@ -316,6 +412,22 @@ final class Battle {
     if (at < _time) throw ArgumentError.value(at, 'at', 'is in the past');
     _timers.schedule(at, timer);
   }
+
+  /// What a snapshot keeps of this battle now (Memento, stack decision 2):
+  /// [Battle.restore] gives it back.
+  BattleMemento save() => BattleMemento(
+    battleId: id,
+    mapId: map.id,
+    settings: settings,
+    seed: random.seed,
+    randomState: random.state,
+    minStartingMoney: minStartingMoney,
+    state: _state,
+    time: _time,
+    nextSeq: _nextSeq,
+    timers: _timers.pending,
+    timersFired: _fired,
+  );
 
   /// Brings the battle to the battle time [to], firing the timers due on
   /// the way in their order.

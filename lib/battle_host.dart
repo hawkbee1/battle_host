@@ -3,7 +3,9 @@
 /// decisions 1, 6 and 7).
 library;
 
+export 'src/adapters/appwrite_storage.dart';
 export 'src/adapters/directory_map_source.dart';
+export 'src/adapters/file_write_ahead_log.dart';
 export 'src/adapters/logger_error_reporter.dart';
 export 'src/adapters/plan_files.dart';
 export 'src/adapters/sentry_error_reporter.dart';
@@ -14,8 +16,11 @@ export 'src/core/battle.dart';
 export 'src/core/battle_setup.dart';
 export 'src/core/battle_state.dart';
 export 'src/core/battle_world.dart';
+export 'src/core/journal.dart';
+export 'src/core/replay.dart';
 export 'src/core/shared_map.dart';
 export 'src/core/simulation_host.dart';
+export 'src/core/snapshot_codec.dart';
 export 'src/core/timer_queue.dart';
 export 'src/orders/command_handler.dart';
 export 'src/orders/command_sinks.dart';
@@ -31,3 +36,5 @@ export 'src/ports/clock.dart';
 export 'src/ports/error_reporter.dart';
 export 'src/ports/log_sink.dart';
 export 'src/ports/map_source.dart';
+export 'src/ports/snapshot_store.dart';
+export 'src/ports/write_ahead_log.dart';

@@ -292,11 +292,11 @@ void main() {
   group('no order, no action', () {
     test('AI-01 decision 156 a unit without an order does nothing, even with '
         'an enemy in sight', () {
-      final before = fingerprint(f.battle.state);
+      final before = stateOf(f.battle);
 
       f.wait(const Duration(hours: 3));
       expect(f.entries.where((entry) => entry.command == null), isEmpty);
-      expect(fingerprint(f.battle.state), equals(before));
+      expect(stateOf(f.battle), equals(before));
     });
 
     test(
