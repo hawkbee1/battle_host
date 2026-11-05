@@ -7,11 +7,18 @@ import 'package:test/test.dart';
 import '../../helpers/fixtures.dart';
 import '../../helpers/stores.dart';
 
-/// A write-ahead log on a full disk.
+/// A write-ahead log on a disk with room for [room] entries.
 final class _FullDisk implements WriteAheadLog {
+  new({this.room = 1});
+
+  int room;
+
   @override
-  void append(String battleId, int position, LogEntry entry) =>
+  void append(String battleId, int position, LogEntry entry) {
+    if (room-- <= 0) {
       throw const FileSystemException('No space left on device');
+    }
+  }
 
   @override
   HeldEntries read(String battleId) => (from: 0, entries: const []);
@@ -78,6 +85,37 @@ void main() {
       expect(last.events, equals(handled.events));
     });
 
+    test('decision 143 a battle starts with an entry naming every section and '
+        'its units, written before its first snapshot', () async {
+      final wal = MemoryWriteAheadLog();
+      final snapshots = MemorySnapshotStore();
+      final host = hostOn(wal: wal, snapshots: snapshots)..start(valleySetup());
+      await host.settle();
+
+      final start = wal.read('b-1').entries.single;
+      expect(start.command, isNull);
+      expect(
+        start.events.first,
+        const BattleStarted(battleId: 'b-1', mapId: 'valley', seed: 7),
+      );
+      expect(
+        start.events.skip(1).whereType<SectionJoined>().map((s) => s.sectionId),
+        ['s-1', 's-2'],
+      );
+      expect((await snapshots.latest('b-1'))!.position, 1);
+    });
+
+    test('a battle whose start cannot be written does not start', () {
+      final host = hostOn(wal: _FullDisk(room: 0));
+
+      expect(
+        () => host.start(valleySetup()),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(host['b-1'], isNull);
+      expect(host.failed, isEmpty);
+    });
+
     test('an order whose entry cannot be written is not acknowledged, and '
         'its battle stops', () async {
       final host = hostOn(wal: _FullDisk())..start(valleySetup());
@@ -94,20 +132,26 @@ void main() {
         'with none uploads nothing', () async {
       final logs = MemoryLogSink();
       final host = hostOn(logs: logs)..start(valleySetup());
+      await host.settle();
+      // The start entry goes up at once, before the first snapshot.
+      expect(logs.batchesOf('b-1').single.entries, hasLength(1));
       logIn(host);
       logIn(host, account: 'a-2');
 
       await wait(host, const Duration(seconds: 5));
-      expect(logs.batchesOf('b-1'), isEmpty);
-      await wait(host, const Duration(seconds: 5));
-      expect(logs.batchesOf('b-1').single.entries, hasLength(2));
-      await wait(host, const Duration(seconds: 10));
-      await wait(host, const Duration(seconds: 10));
       expect(logs.batchesOf('b-1'), hasLength(1));
+      await wait(host, const Duration(seconds: 5));
+      expect(logs.batchesOf('b-1').last.entries, hasLength(2));
+      await wait(host, const Duration(seconds: 10));
+      await wait(host, const Duration(seconds: 10));
+      expect(logs.batchesOf('b-1'), hasLength(2));
 
       logIn(host);
       await wait(host, const Duration(seconds: 10));
-      expect([for (final batch in logs.batchesOf('b-1')) batch.from], [0, 2]);
+      expect(
+        [for (final batch in logs.batchesOf('b-1')) batch.from],
+        [0, 1, 3],
+      );
     });
 
     test('a battle is snapshotted when it starts, then every 5 minutes with '
@@ -115,14 +159,14 @@ void main() {
       final snapshots = MemorySnapshotStore();
       final host = hostOn(snapshots: snapshots)..start(valleySetup());
       await host.settle();
-      expect((await snapshots.latest('b-1'))!.position, 0);
+      expect((await snapshots.latest('b-1'))!.position, 1);
 
       logIn(host);
       await wait(host, const Duration(minutes: 4));
-      expect((await snapshots.latest('b-1'))!.position, 0);
+      expect((await snapshots.latest('b-1'))!.position, 1);
       await wait(host, const Duration(minutes: 1));
       final taken = (await snapshots.latest('b-1'))!;
-      expect(taken.position, 1);
+      expect(taken.position, 2);
       expect(taken.time, const Duration(minutes: 5));
 
       await wait(host, const Duration(minutes: 5));
@@ -131,23 +175,25 @@ void main() {
 
     test('a failed upload is reported and sent again, the same, and the '
         'snapshot after it waits for it', () async {
-      final logs = FlakyLogSink(MemoryLogSink(), failures: 1);
+      final logs = FlakyLogSink(MemoryLogSink());
       final snapshots = MemorySnapshotStore();
       final host = hostOn(logs: logs, snapshots: snapshots)
         ..start(valleySetup());
+      await host.settle();
+      logs.failures = 1;
       logIn(host);
 
       await wait(host, const Duration(minutes: 5));
       expect(reporter.reports.single.$1, isA<StateError>());
-      expect((await snapshots.latest('b-1'))!.position, 0);
+      expect((await snapshots.latest('b-1'))!.position, 1);
 
       logIn(host);
       await wait(host, const Duration(seconds: 10));
-      expect(logs.attempts, hasLength(3));
-      expect(logs.attempts[1].entries, equals(logs.attempts[0].entries));
-      expect(logs.attempts[2].from, 1);
-      expect((await snapshots.latest('b-1'))!.position, 1);
-      expect(await logs.read('b-1'), hasLength(2));
+      expect(logs.attempts, hasLength(4));
+      expect(logs.attempts[2].entries, equals(logs.attempts[1].entries));
+      expect(logs.attempts[3].from, 2);
+      expect((await snapshots.latest('b-1'))!.position, 2);
+      expect(await logs.read('b-1'), hasLength(3));
     });
 
     test(
@@ -163,7 +209,7 @@ void main() {
         expect(await snapshots.latest('b-1'), isNull);
 
         await wait(host, const Duration(seconds: 10));
-        expect((await snapshots.latest('b-1'))!.position, 0);
+        expect((await snapshots.latest('b-1'))!.position, 1);
       },
     );
 
@@ -181,8 +227,8 @@ void main() {
       await wait(host, const Duration(seconds: 10));
 
       expect(host.failed, {'b-1'});
-      expect(logs.batchesOf('b-1'), isEmpty);
-      expect(wal.read('b-1').entries, hasLength(1));
+      expect(logs.batchesOf('b-1').single.entries.single.command, isNull);
+      expect(wal.read('b-1').entries, hasLength(2));
       expect(() => host.snapshot('b-1'), throwsArgumentError);
     });
   });

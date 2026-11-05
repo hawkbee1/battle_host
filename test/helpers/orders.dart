@@ -124,8 +124,9 @@ final class OrdersFixture {
   late final SimulationHost host;
   late final Battle battle;
 
-  /// The battle's log.
-  List<LogEntry> get entries => wal.read('b-1').entries;
+  /// The battle's log after its start entry: the entries of its orders and
+  /// its timers.
+  List<LogEntry> get entries => wal.read('b-1').entries.sublist(1);
 
   /// Sends [order] from [section] of [account], signed in as [origin].
   HandledOrder send(
@@ -197,7 +198,7 @@ void expectReplay(OrdersFixture live, {void Function(Battle)? prepare}) {
   );
   deploy(battle);
   prepare?.call(battle);
-  replay(battle, live.entries, from: 0);
+  replay(battle, live.entries, from: 1);
   battle.advanceTo(live.battle.time);
 
   expect(snapshotOf(battle), equals(snapshotOf(live.battle)));

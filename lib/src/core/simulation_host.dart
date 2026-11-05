@@ -90,12 +90,14 @@ final class SimulationHost {
   /// The battle [battleId], when it runs.
   Battle? operator [](String battleId) => _battles[battleId];
 
-  /// Starts the battle of [setup] now, on its map, and takes its first
-  /// snapshot.
+  /// Starts the battle of [setup] now, on its map: its log starts with the
+  /// battle's start and every section with its units, which the statistics
+  /// read (decision 143), then its first snapshot is taken.
   ///
   /// Throws an [ArgumentError] for a battle ID already in use, also by a
   /// battle stopped by an error (it is [recover]ed, not started again),
-  /// and the errors of [Battle.start].
+  /// the errors of [Battle.start], and those of the write-ahead log: a
+  /// battle whose start is not written does not start.
   Battle start(BattleSetup setup) {
     _checkFree(setup.battleId);
     if (_failed.contains(setup.battleId)) {
@@ -108,7 +110,39 @@ final class SimulationHost {
     );
     final now = clock.now();
     _run(battle, startedAt: now);
-    _journal.open(battle, startedAt: now, now: now);
+    try {
+      _journal.open(
+        battle,
+        startedAt: now,
+        now: now,
+        start: LogEntry(
+          at: Duration.zero,
+          events: [
+            BattleStarted(
+              battleId: battle.id,
+              mapId: battle.map.id,
+              seed: battle.random.seed,
+            ),
+            for (final section in battle.state.sections.values)
+              SectionJoined(
+                sectionId: section.id,
+                accountId: section.accountId,
+                team: section.team,
+                units: [
+                  for (final unit in battle.state.units.values)
+                    if (unit.sectionId == section.id)
+                      JoinedUnit(unitId: unit.id, unitType: unit.type.id),
+                ],
+              ),
+          ],
+        ),
+      );
+    } on Object {
+      _battles.remove(battle.id);
+      _commands.remove(battle.id);
+      _journal.close(battle.id);
+      rethrow;
+    }
     return battle;
   }
 

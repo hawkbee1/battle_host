@@ -68,7 +68,8 @@ void main() {
   group('decision 3 stack decision 2 recovery', () {
     test('the scripted battle uses every kind of order and runs over a day '
         'of timers', () {
-      expect(liveLog.where((entry) => entry.command == null), hasLength(4));
+      // The start entry, then 4 entries of timers.
+      expect(liveLog.where((entry) => entry.command == null), hasLength(5));
       expect(live.battle.time, greaterThan(const Duration(hours: 34)));
       expect(live.battle.state.delta.built, isNotEmpty);
       expect(live.recruit, startsWith('unit-'));

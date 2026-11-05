@@ -51,8 +51,12 @@ void main() {
   group('AI-06 decisions 159 163 a server-managed section', () {
     test('looks like any other section in what the battle tells', () {
       final plain = OrdersFixture();
-      final events = [for (final entry in f.entries) ...entry.events];
-      final plainEvents = [for (final entry in plain.entries) ...entry.events];
+      final events = [
+        for (final entry in f.wal.read('b-1').entries) ...entry.events,
+      ];
+      final plainEvents = [
+        for (final entry in plain.wal.read('b-1').entries) ...entry.events,
+      ];
 
       expect(events, equals(plainEvents));
       expect(f.battle.state.sections['s-2']!.serverManaged, isTrue);

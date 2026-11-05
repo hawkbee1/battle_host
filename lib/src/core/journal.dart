@@ -56,10 +56,10 @@ final class Journal {
   /// Starts keeping the log of [battle], which started at the wall time
   /// [startedAt], at the wall time [now].
   ///
-  /// A new battle has an empty log, and its first snapshot is taken at
-  /// once. A recovered battle has its log uploaded up to [from], then the
-  /// [unsent] entries, and its latest snapshot at [snapshotAt]: its next
-  /// snapshot is due at once.
+  /// A new battle's log starts with its [start] entry, if any, and its
+  /// first snapshot is taken at once, after it. A recovered battle has its
+  /// log uploaded up to [from], then the [unsent] entries, and its latest
+  /// snapshot at [snapshotAt]: its next snapshot is due at once.
   void open(
     Battle battle, {
     required DateTime startedAt,
@@ -67,6 +67,7 @@ final class Journal {
     int from = 0,
     List<LogEntry> unsent = const [],
     int? snapshotAt,
+    LogEntry? start,
   }) {
     final log = _logs[battle.id] = _BattleLog(
       battle: battle,
@@ -77,6 +78,7 @@ final class Journal {
       nextUpload: now.add(uploadEvery),
       nextSnapshot: snapshotAt == null ? now.add(snapshotEvery) : now,
     );
+    if (start != null) append(battle.id, start);
     if (snapshotAt == null) snapshot(battle.id);
     log.seal();
   }
