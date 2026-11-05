@@ -19,12 +19,14 @@ import 'package:battle_rules/battle_rules.dart';
 /// bridge loses (RELIC-26, HQ-23).
 ///
 /// A listener (Observer): it starts a push when a contribution gives it
-/// enough pushers, starts a capture timer when a pot fills, loses a
+/// enough pushers inside the radius, plans it again when one of them
+/// moves (decision 225), starts a capture timer when a pot fills, loses a
 /// capture an enemy entered, and eliminates a team whose HQ was destroyed.
 ///
 /// A pushed relic stands where its push stops from the moment it starts,
 /// like a unit's move: whoever stands on its path then is crushed when it
-/// arrives (lazy state, stack decision 1).
+/// arrives (lazy state, stack decision 1). A push stopped early leaves it
+/// on the last cell it reached.
 /// {@endtemplate}
 final class Relics implements BattleListener {
   /// {@macro relics}
@@ -53,6 +55,10 @@ final class Relics implements BattleListener {
   final CaptureRules _capture;
   final StorageRules _storage;
   final PushingRules _pushing;
+  late final PathMover _pathMover = () {
+    final mover = Mover.relic(battle.definitions.combat.push);
+    return PathMover(apPerM: mover.apPerM, modes: mover.modes);
+  }();
 
   BattleState get _state => battle.state;
   Duration get _now => battle.time;
@@ -91,10 +97,27 @@ final class Relics implements BattleListener {
           break;
       }
     }
-    return [...more, ..._capturesLost()];
+    return [...more, ..._pushersMoved(before), ..._capturesLost()];
   }
 
-  // Pushes (RELIC-22, RELIC-24, RELIC-25, RELIC-28).
+  // Pushes (RELIC-22, RELIC-24, RELIC-25, RELIC-28, decision 225).
+
+  /// Whether [unit] is on the field inside the capture radius of a relic
+  /// on [cell] (RELIC-09).
+  bool _inside(UnitState? unit, CellRef cell) =>
+      unit != null &&
+      unit.onField &&
+      unit.cell!.surface == cell.surface &&
+      world.distanceM(unit.cell!, cell) <= battle.settings.capture.radiusM;
+
+  /// Decision 225: the pushers of [relic] that push it from [cell], those
+  /// of its owner inside the radius.
+  Set<String> _pushersAt(RelicState relic, CellRef cell) => {
+    for (final id in relic.pushers)
+      if (_state.units[id] case final unit?
+          when _inside(unit, cell) && _teamOf(unit) == relic.owner)
+        id,
+  };
 
   List<BattleEvent> _startPush(String relicId) {
     final relic = _state.relics[relicId]!;
@@ -103,14 +126,22 @@ final class Relics implements BattleListener {
     if (relic.push != null || path == null || pot == null || pot.ap == 0) {
       return const [];
     }
-    final mover = Mover.relic(battle.definitions.combat.push);
-    final pathMover = PathMover(apPerM: mover.apPerM, modes: mover.modes);
-    final checked = battle.world.paths.check(mover: pathMover, path: path);
+    final checked = battle.world.paths.check(mover: _pathMover, path: path);
     // RELIC-28: a relic with no path stays stuck.
     if (checked is! PathPasses) return const [];
     final landing = checked.falls.firstOrNull;
-    final end = landing == null ? path.length - 1 : path.indexOf(landing);
-    final along = orders.alongOf(pathMover, path.sublist(0, end + 1));
+    final edge = landing == null ? path.length - 1 : path.indexOf(landing);
+    // Decision 225: the relic stops on the first cell where one of its
+    // pushers is outside the radius; a fall needs them at the edge.
+    final pushers = _pushersAt(relic, relic.cell);
+    var end = edge;
+    for (var i = 1; i < edge; i++) {
+      if (pushers.any((id) => !_inside(_state.units[id], path[i]))) {
+        end = i;
+        break;
+      }
+    }
+    final along = orders.alongOf(_pathMover, path.sublist(0, end + 1));
     final samples = _samples(checked.samples);
     // A unit is met where the relic enters its cell.
     final inPath = <(String, int)>[
@@ -119,16 +150,15 @@ final class Relics implements BattleListener {
           for (final unit in _state.units.values)
             if (unit.onField && unit.cell == path[i]) (unit.id, i),
     ];
-    final pushers = relic.pushers
-        .where((id) => _state.units[id]?.onField ?? false)
-        .length;
-    final full = _pushing.move(
+    PushMove moveTo(int index, List<(String, int)> units) => _pushing.move(
       pot: pot,
-      pushers: pushers,
-      path: _upTo(samples, along[end]),
+      pushers: pushers.length,
+      path: _upTo(samples, along[index]),
       start: _now,
-      unitsInPathAtM: [for (final (_, i) in inPath) along[i - 1]],
+      unitsInPathAtM: [for (final (_, i) in units) along[i - 1]],
+      crushed: relic.crushes,
     );
+    final full = moveTo(end, inPath);
     // RELIC-24: a fall is free, but it still needs its pushers.
     if (full.stop == PushStop.tooFewPushers) return const [];
     // The relic stops on the last cell it reaches.
@@ -141,22 +171,26 @@ final class Relics implements BattleListener {
       for (final entry in inPath)
         if (entry.$2 <= reached) entry,
     ]..sort((a, b) => a.$2.compareTo(b.$2));
-    final move = _pushing.move(
-      pot: pot,
-      pushers: pushers,
-      path: _upTo(samples, along[reached]),
-      start: _now,
-      unitsInPathAtM: [for (final (_, i) in met) along[i - 1]],
-    );
+    final moves = [for (var i = 0; i <= reached; i++) moveTo(i, met)];
+    final move = moves.last;
     final push = RelicPush(
       cell: path[reached],
-      reached: reached,
-      endsAt: move.endsAt,
-      pot: move.pot,
-      crushed: [for (final (id, _) in met.take(move.crushed)) id],
-      landing: reached == end ? landing : null,
+      arrivals: [for (final step in moves) step.endsAt],
+      spent: [for (final step in moves) pot.ap - step.pot.ap],
+      pushers: pushers,
+      crushed: [
+        for (final (id, at) in met.take(move.crushed)) (unitId: id, at: at),
+      ],
+      landing: reached == edge ? landing : null,
     );
-    _putRelic(relic.copyWith(cell: push.cell, push: () => push));
+    // The pot pays the push when it starts and takes AP during it.
+    _putRelic(
+      relic.copyWith(
+        cell: push.cell,
+        pushPot: () => move.pot,
+        push: () => push,
+      ),
+    );
     battle.schedule(push.endsAt, RelicArrives(relicId));
     return [MoveStarted(moverId: relicId, arrivesAt: push.endsAt)];
   }
@@ -186,34 +220,104 @@ final class Relics implements BattleListener {
   /// and, after a fall, those under it (decision 138); a fall empties its
   /// pot (decision 176). It goes on while its pot and path allow.
   List<BattleEvent> finishPush(String relicId) {
-    final relic = _state.relics[relicId];
-    final push = relic?.push;
-    if (relic == null || push == null || push.endsAt != _now) {
-      return const [];
-    }
-    final events = <BattleEvent>[];
+    final push = _state.relics[relicId]?.push;
+    if (push == null || push.endsAt != _now) return const [];
     final landing = push.landing;
     final victims = [
-      ...push.crushed,
+      for (final (:unitId, at: _) in push.crushed) unitId,
       if (landing != null)
         for (final unit in _state.units.values)
           if (unit.onField && unit.cell == landing) unit.id,
     ];
+    final events = <BattleEvent>[];
     for (final id in victims) {
       events.addAll(orders.crush(id, by: relicId));
     }
-    final pot = landing == null ? push.pot : push.pot.fallen();
+    final relic = _state.relics[relicId]!;
+    final pot = landing == null ? relic.pushPot! : relic.pushPot!.fallen();
     final rest = relic.pushPath!.sublist(push.reached);
     final moving = pot.ap > 0 && landing == null && rest.length > 1;
     _putRelic(
-      _state.relics[relicId]!.copyWith(
+      relic.copyWith(
         pushPot: () => pot,
         pushPath: () => moving ? rest : null,
         pushers: pot.ap > 0 ? null : const {},
+        crushes: moving ? relic.crushes + push.crushed.length : 0,
         push: () => null,
       ),
     );
     return [...events, ..._startPush(relicId)];
+  }
+
+  /// Decision 225: when one of its pushers moves inside the radius, comes
+  /// into it or leaves it, a relic's push stops on the cell it has reached
+  /// and starts again with the pushers then inside.
+  List<BattleEvent> _pushersMoved(BattleState before) {
+    final events = <BattleEvent>[];
+    for (final relic in _state.relics.values.toList()) {
+      final push = relic.push;
+      // A push planned in these events already counts its pushers.
+      if (relic.pushPath == null ||
+          !identical(push, before.relics[relic.id]?.push)) {
+        continue;
+      }
+      final at = push?.reachedAt(_now) ?? 0;
+      // Its arrival, due now, plans what follows.
+      if (push != null && at == push.reached) continue;
+      final cell = push == null ? relic.cell : relic.pushPath![at];
+      final moved = relic.pushers.any((id) {
+        final was = before.units[id];
+        final now = _state.units[id];
+        return _placeOf(was) != _placeOf(now) &&
+            (_inside(was, cell) || _inside(now, cell));
+      });
+      if (!moved) continue;
+      events
+        ..addAll(_stopPush(relic.id, at))
+        ..addAll(_startPush(relic.id));
+    }
+    return events;
+  }
+
+  static (bool, CellRef?, String?) _placeOf(UnitState? unit) =>
+      (unit?.onField ?? false, unit?.cell, unit?.sectionId);
+
+  /// Stops the push of [relicId] on the [at]th cell of its path, the last
+  /// it has reached: the units it met on the way are crushed, and the pot
+  /// gets back what the rest of the push would have cost.
+  List<BattleEvent> _stopPush(String relicId, int at) {
+    final push = _state.relics[relicId]!.push;
+    if (push == null) return const [];
+    final cell = _state.relics[relicId]!.pushPath![at];
+    final met = [
+      for (final (:unitId, at: index) in push.crushed)
+        if (index <= at) unitId,
+    ];
+    final point = world.pointOf(cell);
+    final events = <BattleEvent>[
+      MoveStopped(
+        moverId: relicId,
+        at: Position.metres(point.x, point.y, point.z),
+      ),
+    ];
+    for (final id in met) {
+      events.addAll(orders.crush(id, by: relicId));
+    }
+    final relic = _state.relics[relicId]!;
+    final pot = relic.pushPot!;
+    _putRelic(
+      relic.copyWith(
+        cell: cell,
+        pushPot: () => PushPot(
+          owner: pot.owner,
+          ap: pot.ap + push.spent.last - push.spent[at],
+        ),
+        pushPath: () => relic.pushPath!.sublist(at),
+        crushes: relic.crushes + met.length,
+        push: () => null,
+      ),
+    );
+    return events;
   }
 
   // Captures (RELIC-05, RELIC-08, RELIC-10 to RELIC-12).

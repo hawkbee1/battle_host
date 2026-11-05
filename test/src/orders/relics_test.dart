@@ -338,6 +338,27 @@ void main() {
   });
 
   group('pushes', () {
+    /// A soldier [id] of `s-1`, on the field.
+    void recruit(String id) {
+      final extra = f.unit('soldier-1');
+      f.battle.change(
+        (state) => state.withUnit(
+          UnitState(
+            id: id,
+            sectionId: 's-1',
+            type: extra.type,
+            tree: extra.tree,
+            xp: extra.xp,
+            location: const Deployed(),
+            pool: extra.pool,
+            health: extra.health,
+            morale: extra.morale,
+            weapon: extra.weapon,
+          ),
+        ),
+      );
+    }
+
     /// Puts [pushers] next to [relicId], owned by team 1, and has each push
     /// [times] times; the first push names [path].
     void push(
@@ -406,23 +427,7 @@ void main() {
       expect(relic('relic-2').cell, equals(const CellRef(3, 0)));
 
       f = OrdersFixture();
-      final extra = f.unit('soldier-1');
-      f.battle.change(
-        (state) => state.withUnit(
-          UnitState(
-            id: 'soldier-9',
-            sectionId: 's-1',
-            type: extra.type,
-            tree: extra.tree,
-            xp: extra.xp,
-            location: const Deployed(),
-            pool: extra.pool,
-            health: extra.health,
-            morale: extra.morale,
-            weapon: extra.weapon,
-          ),
-        ),
-      );
+      recruit('soldier-9');
       place('soldier-3', const CellRef(4, 0));
       push(
         'relic-2',
@@ -471,6 +476,136 @@ void main() {
       expect(fallen.pushPot!.ap, equals(0));
     });
 
+    test('RELIC-24 the AP put in during a push stay in the pot', () {
+      push('relic-2', const [
+        Cell(3, 0),
+        Cell(4, 0),
+      ], near: const CellRef(3, 1));
+      expect(relic('relic-2').push, isNotNull);
+      f
+        ..send(const Push(unitId: 'soldier-1', relicId: 'relic-2'))
+        ..wait(const Duration(hours: 2));
+      expect(relic('relic-2').push, isNull);
+      expect(relic('relic-2').pushPot!.ap, equals(5));
+    });
+
+    group('decision 225 the pushers inside the radius', () {
+      const path = [CellRef(3, 0), CellRef(4, 0), CellRef(4, 1), CellRef(4, 2)];
+
+      /// Gives relic-2 to team 1 with [ap] in its pot and [path] chosen,
+      /// then has each of [pushers], standing on [near], push it once.
+      List<BattleEvent> pushWith(
+        List<String> pushers, {
+        double ap = 400,
+        CellRef near = const CellRef(3, 2),
+      }) {
+        own('team-1', ['relic-2']);
+        f.battle.change(
+          (state) => state.withRelic(
+            state.relics['relic-2']!.withPots(
+              pushPot: PushPot(owner: 'team-1', ap: ap),
+              pushPath: path,
+            ),
+          ),
+        );
+        final events = <BattleEvent>[];
+        for (final id in pushers) {
+          place(id, near);
+          events.addAll(eventsOf(Push(unitId: id, relicId: 'relic-2')));
+        }
+        return events;
+      }
+
+      HandledOrder walk(String unitId, CellRef to) =>
+          f.send(Move(unitId: unitId, to: centreOf(f.battle, to)));
+
+      test('a pusher outside does not push; one coming back pushes again', () {
+        pushWith(team1Pushers.where((id) => id != 'jeep-1').toList());
+        expect(relic('relic-2').push, isNull);
+        pushWith(['jeep-1'], ap: relic('relic-2').pushPot!.ap);
+        expect(relic('relic-2').push, isNotNull);
+
+        f.wait(const Duration(minutes: 30));
+        expect(
+          walk('jeep-1', const CellRef(0, 7)).events,
+          contains(isA<MoveStopped>()),
+        );
+        expect(relic('relic-2').push, isNull);
+        expect(relic('relic-2').cell, equals(const CellRef(3, 0)));
+        expect(
+          walk('jeep-1', const CellRef(3, 2)).events,
+          contains(
+            isA<MoveStarted>().having((e) => e.moverId, 'id', 'relic-2'),
+          ),
+        );
+        expect(relic('relic-2').push!.pushers, contains('jeep-1'));
+      });
+
+      test('the relic stops on the first cell where one is outside, then '
+          'goes on with the others', () {
+        recruit('soldier-9');
+        place('soldier-9', const CellRef(1, 0));
+        own('team-1', ['relic-2']);
+        eventsOf(const Push(unitId: 'soldier-9', relicId: 'relic-2'));
+        pushWith(team1Pushers);
+
+        final first = relic('relic-2').push!;
+        expect(first.pushers, hasLength(10));
+        expect(first.cell, equals(const CellRef(4, 1)));
+
+        f.wait(first.endsAt - f.battle.time);
+        final second = relic('relic-2').push!;
+        expect(second.pushers, isNot(contains('soldier-9')));
+        expect(second.cell, equals(const CellRef(4, 2)));
+      });
+
+      test('a pusher walking away stops the push on the cell it reached; the '
+          'pot gets back the rest', () {
+        pushWith(team1Pushers);
+        final push = relic('relic-2').push!;
+        expect(push.cell, equals(const CellRef(4, 2)));
+        expect(
+          relic('relic-2').pushPot!.ap,
+          closeTo(450 - push.spent.last, 1e-9),
+        );
+
+        f.wait(const Duration(hours: 3));
+        final stopped = walk('jeep-1', const CellRef(0, 7)).events;
+        expect(
+          stopped,
+          contains(
+            MoveStopped(
+              moverId: 'relic-2',
+              at: centreOf(f.battle, const CellRef(4, 0)),
+            ),
+          ),
+        );
+        final relic2 = relic('relic-2');
+        expect(relic2.push, isNull);
+        expect(relic2.cell, equals(const CellRef(4, 0)));
+        expect(relic2.pushPath, equals(path.sublist(1)));
+        expect(relic2.pushPot!.ap, closeTo(450 - push.spent[1], 1e-9));
+      });
+
+      test('RELIC-25 decision 185 a relic that crushed its extra units stops '
+          'at the next and does not crush it later', () {
+        recruit('soldier-9');
+        place('soldier-2', const CellRef(4, 0));
+        place('soldier-3', const CellRef(4, 1));
+        pushWith([...team1Pushers, 'soldier-9']);
+        expect(relic('relic-2').push!.cell, equals(const CellRef(4, 0)));
+
+        f.wait(const Duration(hours: 3));
+        eventsOf(const Push(unitId: 'soldier-1', relicId: 'relic-2'));
+        f.wait(const Duration(hours: 3));
+
+        expect(f.battle.state.units, isNot(contains('soldier-2')));
+        expect(f.battle.state.units, contains('soldier-3'));
+        expect(relic('relic-2').cell, equals(const CellRef(4, 0)));
+        expect(relic('relic-2').crushes, equals(1));
+      });
+    });
+
     test('RELIC-28 a relic with no path stays stuck', () {
       push('relic-2', const [
         Cell(3, 0),
@@ -517,6 +652,49 @@ void main() {
   });
 
   group('a replay', () {
+    test('decision 225 of a push its pushers stop and start again reaches '
+        'the same state', () {
+      void prepare(Battle battle) => battle.change((state) {
+        var next = state.withRelic(
+          state.relics['relic-2']!.copyWith(
+            owner: 'team-1',
+            pushPot: () => const PushPot(owner: 'team-1', ap: 400),
+            pushPath: () => const [
+              CellRef(3, 0),
+              CellRef(4, 0),
+              CellRef(4, 1),
+              CellRef(4, 2),
+            ],
+          ),
+        );
+        for (final id in team1Pushers) {
+          next = next.withUnit(
+            next.units[id]!.copyWith(
+              location: const Deployed(),
+              cell: const CellRef(3, 2),
+            ),
+          );
+        }
+        return next;
+      });
+      void walk(CellRef to) =>
+          eventsOf(Move(unitId: 'jeep-1', to: centreOf(f.battle, to)));
+
+      prepare(f.battle);
+      for (final id in team1Pushers) {
+        eventsOf(Push(unitId: id, relicId: 'relic-2'));
+      }
+      f.wait(const Duration(hours: 3));
+      walk(const CellRef(0, 7));
+      f.wait(const Duration(hours: 1));
+      walk(const CellRef(3, 2));
+      f.wait(const Duration(hours: 10));
+
+      expect(relic('relic-2').cell, equals(const CellRef(4, 2)));
+      expect(relic('relic-2').push, isNull);
+      expectReplay(f, prepare: prepare);
+    });
+
     test('of a battle won by the relic timer reaches the same result', () {
       void prepare(Battle battle) => battle.change((state) {
         var next = state;

@@ -264,8 +264,8 @@ final class HqState {
 }
 
 /// {@template team_state}
-/// A team: its HQ, its HQ manager (HQ-05) and whether it is eliminated
-/// (HQ-18).
+/// A team: its HQ, its HQ manager (HQ-05), the player who would manage it
+/// had nobody delegated the role, and whether it is eliminated (HQ-18).
 /// {@endtemplate}
 final class TeamState {
   /// {@macro team_state}
@@ -273,6 +273,7 @@ final class TeamState {
     required this.id,
     required this.hq,
     this.managerAccountId,
+    this.holderAccountId,
     this.eliminated = false,
   });
 
@@ -286,6 +287,11 @@ final class TeamState {
   /// in (HQ-07, decision 220).
   final String? managerAccountId;
 
+  /// The account that would manage its HQ had nobody delegated the role:
+  /// the first of its players to log in, then each who logged in ranking
+  /// above (decisions 220, 227).
+  final String? holderAccountId;
+
   /// Whether it is out of the battle.
   final bool eliminated;
 
@@ -294,14 +300,26 @@ final class TeamState {
     id: id,
     hq: hq,
     managerAccountId: managerAccountId,
+    holderAccountId: holderAccountId,
     eliminated: eliminated,
   );
 
-  /// This team with [accountId] as its HQ manager (HQ-07).
+  /// This team with [accountId] as its HQ manager, by delegation (HQ-05).
   TeamState withManager(String accountId) => TeamState(
     id: id,
     hq: hq,
     managerAccountId: accountId,
+    holderAccountId: holderAccountId,
+    eliminated: eliminated,
+  );
+
+  /// This team with [accountId] holding the role by rank, and managing its
+  /// HQ (HQ-07, decision 227).
+  TeamState withHolder(String accountId) => TeamState(
+    id: id,
+    hq: hq,
+    managerAccountId: accountId,
+    holderAccountId: accountId,
     eliminated: eliminated,
   );
 
@@ -310,44 +328,60 @@ final class TeamState {
     id: id,
     hq: hq,
     managerAccountId: managerAccountId,
+    holderAccountId: holderAccountId,
     eliminated: true,
   );
 }
 
 /// {@template relic_push}
-/// A push under way (RELIC-24): the relic reaches [cell], the [reached]th
-/// cell of its path, at [endsAt], with [pot] left; it crushes [crushed] on
-/// the way (RELIC-25) and, when it goes over an island's edge, lands on
-/// [landing] (RELIC-22).
+/// A push under way (RELIC-24), planned when it starts: the relic reaches
+/// the cells of its path, up to [cell], at the [arrivals], having spent
+/// [spent] AP of its pot by each. The [pushers] push it, those inside the
+/// radius when it starts (decision 225). It crushes the units [crushed] on
+/// the way, each where it meets them (RELIC-25), and, when it goes over an
+/// island's edge, lands on [landing] (RELIC-22).
 /// {@endtemplate}
 final class RelicPush {
   /// {@macro relic_push}
-  const new({
+  new({
     required this.cell,
-    required this.reached,
-    required this.endsAt,
-    required this.pot,
-    this.crushed = const [],
+    required List<Duration> arrivals,
+    required List<double> spent,
+    required Set<String> pushers,
+    List<({String unitId, int at})> crushed = const [],
     this.landing,
-  });
+  }) : arrivals = List.unmodifiable(arrivals),
+       spent = List.unmodifiable(spent),
+       pushers = Set.unmodifiable(pushers),
+       crushed = List.unmodifiable(crushed);
 
   /// Where it stops.
   final CellRef cell;
 
-  /// How many cells of its path it covers.
-  final int reached;
+  /// The battle time it reaches each cell of its path, from its start.
+  final List<Duration> arrivals;
 
-  /// The battle time it stops.
-  final Duration endsAt;
+  /// The AP of its pot it has spent by each cell of its path.
+  final List<double> spent;
 
-  /// Its pot when it stops.
-  final PushPot pot;
+  /// The pushers that push it.
+  final Set<String> pushers;
 
-  /// The units it crushes on the way.
-  final List<String> crushed;
+  /// The units it crushes, with the index of the cell where it meets each.
+  final List<({String unitId, int at})> crushed;
 
   /// The ground cell it falls on; null when it does not fall.
   final CellRef? landing;
+
+  /// How many cells of its path it covers.
+  int get reached => arrivals.length - 1;
+
+  /// The battle time it stops.
+  Duration get endsAt => arrivals.last;
+
+  /// The index of the last cell of its path it has reached at [time].
+  int reachedAt(Duration time) =>
+      arrivals.lastIndexWhere((arrival) => arrival <= time);
 }
 
 /// {@template relic_state}
@@ -365,6 +399,7 @@ final class RelicState {
     this.pushPot,
     this.pushPath,
     this.pushers = const {},
+    this.crushes = 0,
     this.push,
   });
 
@@ -386,9 +421,14 @@ final class RelicState {
   /// The path of the push, chosen while the pot was empty.
   final List<CellRef>? pushPath;
 
-  /// The units that put AP into its push pot since it was last empty: its
-  /// pushers while they are on the field (RELIC-24; assumed, Q-REL-15).
+  /// The units that put AP into its push pot since it was last empty:
+  /// those on the field inside the capture radius push it (RELIC-24,
+  /// decision 225).
   final Set<String> pushers;
+
+  /// The units its push crushed since its path was chosen: they count
+  /// among those its extra pushers may crush (RELIC-25, decision 185).
+  final int crushes;
 
   /// The push under way; null while it stands still.
   final RelicPush? push;
@@ -413,6 +453,7 @@ final class RelicState {
     PushPot? Function()? pushPot,
     List<CellRef>? Function()? pushPath,
     Set<String>? pushers,
+    int? crushes,
     RelicPush? Function()? push,
   }) => RelicState(
     id: id,
@@ -422,6 +463,7 @@ final class RelicState {
     pushPot: pushPot == null ? this.pushPot : pushPot(),
     pushPath: pushPath == null ? this.pushPath : pushPath(),
     pushers: pushers ?? this.pushers,
+    crushes: crushes ?? this.crushes,
     push: push == null ? this.push : push(),
   );
 }

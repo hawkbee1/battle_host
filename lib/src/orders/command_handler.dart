@@ -415,25 +415,27 @@ final class CommandHandler {
     });
   }
 
-  // The HQ manager (HQ-07, decision 220).
+  // The HQ manager (HQ-07, decisions 220, 227): a player who logs in is
+  // compared with the holder of the role by rank, not with a delegate.
 
   OrderPlan _enter(SectionState section) {
     final team = _state.teams[section.team]!;
-    final current = team.managerAccountId;
-    final managing = _state.sections.values
-        .where((other) => other.accountId == current)
+    final holder = team.holderAccountId;
+    final holding = _state.sections.values
+        .where((other) => other.accountId == holder)
         .firstOrNull;
     return PlanReady(() {
-      final manager = _teams.afterLogIn(
-        manager: managing == null ? null : _candidate(managing),
+      final ranked = _teams.afterLogIn(
+        holder: holding == null ? null : _candidate(holding),
         entering: _candidate(section),
         random: battle.random,
       );
-      if (manager.playerId == current) return const [];
+      if (ranked.playerId == holder) return const [];
       battle.change(
-        (state) => state.withTeam(team.withManager(manager.playerId)),
+        (state) => state.withTeam(team.withHolder(ranked.playerId)),
       );
-      return [ManagerChanged(team: team.id, accountId: manager.playerId)];
+      if (ranked.playerId == team.managerAccountId) return const [];
+      return [ManagerChanged(team: team.id, accountId: ranked.playerId)];
     });
   }
 

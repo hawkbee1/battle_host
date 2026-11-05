@@ -701,7 +701,18 @@ void main() {
       );
     });
 
-    test('ECO-02 an enemy HQ hit earns money and no XP', () {
+    double hqXp(List<XpEvent> events) => xpRules
+        .split(
+          events.fold(
+            0,
+            (sum, event) =>
+                sum +
+                xpRules.earn(event, history: XpHistory(), at: Duration.zero).xp,
+          ),
+        )
+        .unit;
+
+    test('ECO-02 HQ-04 decision 224 an enemy HQ hit earns money and XP', () {
       place('soldier-1', const CellRef(8, 1));
       final attack =
           eventsOf(
@@ -715,10 +726,14 @@ void main() {
 
       expect(attack.impacts.single.targetId, equals(hqId('team-2')));
       expect(section('s-1').money, equals(1000 + economy.earnings.hqHit));
-      expect(f.unit('soldier-1').xp.earned, equals(0));
+      expect(
+        f.unit('soldier-1').xp.earned,
+        closeTo(hqXp([const HqHitXp(hqId: 'hq')]), 1e-9),
+      );
     });
 
-    test('HQ-04 destroying an enemy HQ earns its money', () {
+    test('HQ-04 decisions 201 224 the shot that destroys an enemy HQ earns '
+        'its hit and its destruction, money and XP', () {
       final team = f.battle.state.teams['team-2']!;
       f.battle.change(
         (state) => state.withTeam(
@@ -743,6 +758,15 @@ void main() {
       expect(
         section('s-1').money,
         equals(1000 + economy.earnings.hqHit + economy.earnings.hqDestruction),
+      );
+      // UNIT-11: the last HQ standing wins, with its victory XP.
+      expect(
+        f.unit('soldier-1').xp.earned,
+        closeTo(
+          hqXp([const HqHitXp(hqId: 'hq'), const HqDestroyedXp(hqId: 'hq')]) +
+              xpRules.split(xpRules.victoryXp).unit,
+          1e-9,
+        ),
       );
     });
 

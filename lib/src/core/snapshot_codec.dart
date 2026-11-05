@@ -230,6 +230,7 @@ _Json _team(TeamState team) => {
     ..._maybeTime('movingUntil', team.hq.movingUntil),
   },
   'manager': ?team.managerAccountId,
+  'holder': ?team.holderAccountId,
   'eliminated': team.eliminated,
 };
 
@@ -247,13 +248,16 @@ _Json _relic(RelicState relic) => {
   if (relic.pushPath case final path?)
     'pushPath': [for (final cell in path) _cell(cell)],
   'pushers': relic.pushers.toList(),
+  'crushes': relic.crushes,
   if (relic.push case final push?)
     'push': {
       'cell': _cell(push.cell),
-      'reached': push.reached,
-      'endsAt': push.endsAt.inMicroseconds,
-      'pot': _pushPot(push.pot),
-      'crushed': push.crushed,
+      'arrivals': [for (final at in push.arrivals) at.inMicroseconds],
+      'spent': push.spent,
+      'pushers': push.pushers.toList(),
+      'crushed': [
+        for (final (:unitId, :at) in push.crushed) {'unit': unitId, 'at': at},
+      ],
       if (push.landing case final landing?) 'landing': _cell(landing),
     },
 };
@@ -547,6 +551,7 @@ final class _Decoder {
         movingUntil: hq.maybeTime('movingUntil'),
       ),
       managerAccountId: team.maybeText('manager'),
+      holderAccountId: team.maybeText('holder'),
       eliminated: team.flag('eliminated'),
     );
   }
@@ -571,16 +576,8 @@ final class _Decoder {
           ? List.unmodifiable(relic.cells('pushPath'))
           : null,
       pushers: Set.unmodifiable(relic.texts('pushers')),
-      push: push == null
-          ? null
-          : RelicPush(
-              cell: push.cell('cell'),
-              reached: push.integer('reached'),
-              endsAt: push.time('endsAt'),
-              pot: _pushPot(push.item('pot')),
-              crushed: List.unmodifiable(push.texts('crushed')),
-              landing: push.has('landing') ? push.cell('landing') : null,
-            ),
+      crushes: relic.integer('crushes'),
+      push: push == null ? null : _push(push),
     );
   }
 
@@ -695,6 +692,30 @@ final class _Decoder {
   static Health _health(_Reader health) =>
       Health(current: health.number('current'), max: health.number('max'));
 
+  static RelicPush _push(_Reader push) {
+    final arrivals = [
+      for (final micros in push.integers('arrivals'))
+        Duration(microseconds: micros),
+    ];
+    final spent = push.numberList('spent');
+    if (arrivals.length < 2 || spent.length != arrivals.length) {
+      throw FormatException(
+        'not a battle snapshot: ${push.path}.arrivals is not a push',
+      );
+    }
+    return RelicPush(
+      cell: push.cell('cell'),
+      arrivals: arrivals,
+      spent: spent,
+      pushers: push.texts('pushers').toSet(),
+      crushed: [
+        for (final crush in push.items('crushed'))
+          (unitId: crush.text('unit'), at: crush.integer('at')),
+      ],
+      landing: push.has('landing') ? push.cell('landing') : null,
+    );
+  }
+
   static PushPot _pushPot(_Reader pot) =>
       PushPot(owner: pot.text('owner'), ap: pot.number('ap'));
 }
@@ -751,6 +772,11 @@ final class _Reader {
   List<int> integers(String key) => [
     for (final (index, value) in _list(key).indexed)
       _as<int>(value, '$path.$key[$index]'),
+  ];
+
+  List<double> numberList(String key) => [
+    for (final (index, value) in _list(key).indexed)
+      _as<num>(value, '$path.$key[$index]').toDouble(),
   ];
 
   List<String> texts(String key) => [

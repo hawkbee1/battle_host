@@ -97,7 +97,7 @@ Battle richBattle() {
             lockedUntil: _s(10800),
           ),
         )
-        .withTeam(team1.withManager('a-1'))
+        .withTeam(team1.withHolder('a-1').withManager('a-3'))
         .withTeam(
           TeamState(
             id: 'team-2',
@@ -121,12 +121,13 @@ Battle richBattle() {
             pushPot: () => const PushPot(owner: 'team-1', ap: 3),
             pushPath: () => const [CellRef(0, 3), CellRef(1, 3)],
             pushers: {'radio-1', 'scout-1'},
+            crushes: 2,
             push: () => RelicPush(
               cell: const CellRef(1, 3),
-              reached: 1,
-              endsAt: _s(8),
-              pot: const PushPot(owner: 'team-1', ap: 1),
-              crushed: const ['soldier-3'],
+              arrivals: [_s(1), _s(8)],
+              spent: const [0, 12.5],
+              pushers: {'scout-1'},
+              crushed: const [(unitId: 'soldier-3', at: 1)],
               landing: const CellRef(5, 5),
             ),
           ),
@@ -332,6 +333,12 @@ void main() {
         'an object where none is': (json) => at(json, ['state'])['units'] = [1],
         'a map value of the wrong kind': (json) =>
             unit(json, 'jeep-1')['tree'] = {'hp': 'five'},
+        'a number list item of the wrong kind': (json) =>
+            at(json, ['state', 'relics', 0, 'push'])['spent'] = [0, 'all'],
+        'a push that does not move': (json) =>
+            at(json, ['state', 'relics', 0, 'push'])['arrivals'] = [5],
+        'a push with a cost per cell missing': (json) =>
+            at(json, ['state', 'relics', 0, 'push'])['spent'] = [0],
       };
 
       for (final MapEntry(key: name, value: change) in cases.entries) {

@@ -368,6 +368,38 @@ void main() {
       );
     });
 
+    test('HQ-07 decision 227 a player who logs in takes the role from a '
+        'delegate only by ranking above the player who would hold it', () {
+      join('s-1', 'a-1', {'silver': 1});
+      join('s-3', 'a-3', {'gold': 1});
+      join('s-4', 'a-4', {});
+      join('s-5', 'a-5', {'bronze': 1});
+      expect(
+        eventsOf(const DelegateHq(accountId: 'a-4')),
+        equals([const ManagerChanged(team: 'team-1', accountId: 'a-4')]),
+      );
+
+      // a-5 ranks above the delegate a-4, not above a-1.
+      expect(logIn('s-5', 'a-5'), isEmpty);
+      expect(logIn('s-1', 'a-1'), isEmpty);
+      expect(f.battle.state.teams['team-1']!.managerAccountId, 'a-4');
+      expect(
+        logIn('s-3', 'a-3'),
+        equals([const ManagerChanged(team: 'team-1', accountId: 'a-3')]),
+      );
+      expect(f.battle.state.teams['team-1']!.holderAccountId, 'a-3');
+    });
+
+    test('decision 227 the holder delegated to who logs in later keeps the '
+        'role, as its holder', () {
+      join('s-4', 'a-4', {'gold': 1});
+      eventsOf(const DelegateHq(accountId: 'a-4'));
+
+      expect(logIn('s-4', 'a-4'), isEmpty);
+      final team = f.battle.state.teams['team-1']!;
+      expect((team.managerAccountId, team.holderAccountId), ('a-4', 'a-4'));
+    });
+
     test('decision 220 only the server tells that a player logs in', () {
       final refusal = f
           .send(const EnterBattle(), section: 's-2', account: 'a-2')
@@ -675,6 +707,49 @@ void main() {
 
       test('UNIT-39 takes it prisoner instead when the section is full', () {
         expect(finalBlow(1, room: false), ImpactResult.prisoner);
+      });
+
+      test('UNIT-05 ECO-18 decision 223 a prisoner or a defection earns the '
+          'kill XP but not its money', () {
+        final fresh = OrdersFixture();
+        final attackerXp = fresh.unit('commander-1').xp.earned;
+        final targetXp = fresh.unit('soldier-2').xp.earned;
+        final rules = XpRules(planData.units.progression);
+        double earn(XpEvent event) =>
+            rules.earn(event, history: XpHistory(), at: Duration.zero).xp;
+        final hitAndKill = rules
+            .split(
+              earn(
+                    HitXp(
+                      targetId: 'soldier-2',
+                      attackerXp: attackerXp,
+                      targetXp: targetXp,
+                    ),
+                  ) +
+                  earn(
+                    KillXp(
+                      targetId: 'soldier-2',
+                      attackerXp: attackerXp,
+                      targetXp: targetXp,
+                    ),
+                  ),
+            )
+            .unit;
+
+        for (final (seed, result) in [
+          (11, ImpactResult.prisoner),
+          (1, ImpactResult.defected),
+        ]) {
+          expect(finalBlow(seed, room: true), result);
+          expect(
+            f.unit('commander-1').xp.earned,
+            closeTo(attackerXp + hitAndKill, 1e-9),
+          );
+          expect(
+            f.battle.state.sections['s-1']!.money,
+            equals(planData.economy.earnings.hit),
+          );
+        }
       });
     });
 

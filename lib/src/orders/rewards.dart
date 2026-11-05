@@ -20,9 +20,9 @@ abstract interface class BattleListener {
 /// that loses its last unit besides its commander gets its money floor
 /// (ECO-13).
 ///
-/// A target taken prisoner or turned is out of its team like a dead one:
-/// it earns the kill (assumed, Q-UNIT-24). An HQ earns money, not XP
-/// (assumed, Q-UNIT-25).
+/// A target taken prisoner or turned earns the kill's XP, not its money
+/// (decision 223). An HQ hit and its destruction earn XP and money
+/// (decision 224).
 /// {@endtemplate}
 final class Rewards implements BattleListener {
   /// {@macro rewards}
@@ -90,17 +90,25 @@ final class Rewards implements BattleListener {
     final attackerXp = before.units[attack.attackerId]!.xp.earned;
     for (final impact in attack.impacts) {
       final out = impact.result != ImpactResult.damaged;
+      // Decision 201: the shot that kills, or destroys an HQ, earns its kill
+      // unshrunk by its own hit.
+      final history = _state.units[attack.attackerId]?.xpHistory ?? XpHistory();
       if (impact.targetType == 'hq') {
+        _award(
+          attack.attackerId,
+          HqHitXp(hqId: impact.targetId, friendly: impact.friendly),
+        );
         _pay(attack.sectionId, HqHitEarning(own: impact.friendly));
-        if (out) {
-          _pay(attack.sectionId, HqDestroyedEarning(own: impact.friendly));
-        }
+        if (!out) continue;
+        _award(
+          attack.attackerId,
+          HqDestroyedXp(hqId: impact.targetId, friendly: impact.friendly),
+          history: history,
+        );
+        _pay(attack.sectionId, HqDestroyedEarning(own: impact.friendly));
         continue;
       }
       final targetXp = before.units[impact.targetId]!.xp.earned;
-      // Decision 201: the shot that kills earns its kill unshrunk by its
-      // own hit.
-      final history = _state.units[attack.attackerId]?.xpHistory;
       _award(
         attack.attackerId,
         HitXp(
@@ -122,31 +130,27 @@ final class Rewards implements BattleListener {
         ),
         history: history,
       );
-      _pay(attack.sectionId, KillEarning(ally: impact.friendly));
+      if (impact.result == ImpactResult.killed) {
+        _pay(attack.sectionId, KillEarning(ally: impact.friendly));
+      }
     }
   }
 
   /// Gives [unitId] the XP of [event], less its section's share (UNIT-14),
   /// priced against its awards [history] (its own by default) and added to
-  /// them. A unit that died of its own shot earns nothing.
+  /// its own. A unit that died of its own shot earns nothing.
   void _award(String unitId, XpEvent event, {XpHistory? history}) {
     final unit = _state.units[unitId];
     if (unit == null) return;
-    final priced = _xp.earn(
+    final award = _xp.earn(
       event,
-      history: history ?? unit.xpHistory ?? XpHistory(),
+      history: unit.xpHistory ?? XpHistory(),
       at: battle.time,
     );
-    final award = XpAward(
-      xp: priced.xp,
-      history: history == null
-          ? priced.history
-          : XpHistory([
-              ...?unit.xpHistory?.awards,
-              ...priced.history.awards.skip(history.awards.length),
-            ]),
-    );
-    final split = _xp.split(award.xp);
+    final priced = history == null
+        ? award
+        : _xp.earn(event, history: history, at: battle.time);
+    final split = _xp.split(priced.xp);
     final section = _state.sections[unit.sectionId]!;
     battle.change(
       (state) => state
