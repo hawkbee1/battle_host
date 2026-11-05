@@ -116,7 +116,8 @@ final class SimulationHost {
   /// error (stack decision 2): its latest snapshot, then the batches of its
   /// log uploaded after it and its write-ahead log beyond them, replayed.
   /// The entries not uploaded yet wait for the next upload. It is then
-  /// brought to the clock's time, which the battle spent stopped.
+  /// brought to the clock's time: the time it spent stopped counts
+  /// (decision 222).
   ///
   /// Throws an [ArgumentError] for a battle that runs; a [StateError] for
   /// a battle with no snapshot, a write-ahead log that starts after the

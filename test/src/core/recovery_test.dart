@@ -192,8 +192,8 @@ void main() {
       expect(await logs.read('b-1'), equals(liveLog));
     });
 
-    test('a battle stopped for two hours comes back with the timers of that '
-        'time fired', () async {
+    test('decision 222 a battle stopped for two hours comes back with the '
+        'timers of that time fired', () async {
       const stop = 29;
       const outage = Duration(hours: 2);
       final waited = ScriptedHost.alone();
