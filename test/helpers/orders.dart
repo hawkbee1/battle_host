@@ -12,53 +12,56 @@ import 'fixtures.dart';
 /// of most types; team 2 (`s-2` of `a-2`, no money) has a commander and two
 /// soldiers.
 /// `soldier-4`, `soldier-5` and the guild camp `camp-1` stay in storage.
-BattleSetup ordersSetup({int seed = 11}) => BattleSetup(
-  battleId: 'b-1',
-  mapId: 'valley',
-  seed: seed,
-  settings: planData.battle,
-  teams: const [
-    TeamSetup(
-      id: 'team-1',
-      sections: [
-        SectionSetup(
-          id: 's-1',
-          accountId: 'a-1',
-          money: 1000,
-          units: [
-            UnitSetup(id: 'commander-1', type: 'commander'),
-            UnitSetup(id: 'soldier-1', type: 'soldier'),
-            UnitSetup(id: 'medic-1', type: 'medic'),
-            UnitSetup(id: 'engineer-1', type: 'engineer'),
-            UnitSetup(id: 'scout-1', type: 'scout'),
-            UnitSetup(id: 'artillery-1', type: 'artillery'),
-            UnitSetup(id: 'radio-1', type: 'radio'),
-            UnitSetup(id: 'truck-1', type: 'truck'),
-            UnitSetup(id: 'helicopter-1', type: 'helicopter'),
-            UnitSetup(id: 'jeep-1', type: 'jeep'),
-            UnitSetup(id: 'soldier-4', type: 'soldier'),
-            UnitSetup(id: 'soldier-5', type: 'soldier'),
-            UnitSetup(id: 'camp-1', type: 'encampment'),
+/// The server runs `s-2` when [serverManaged] (AI-06).
+BattleSetup ordersSetup({int seed = 11, bool serverManaged = false}) =>
+    BattleSetup(
+      battleId: 'b-1',
+      mapId: 'valley',
+      seed: seed,
+      settings: planData.battle,
+      teams: [
+        const TeamSetup(
+          id: 'team-1',
+          sections: [
+            SectionSetup(
+              id: 's-1',
+              accountId: 'a-1',
+              money: 1000,
+              units: [
+                UnitSetup(id: 'commander-1', type: 'commander'),
+                UnitSetup(id: 'soldier-1', type: 'soldier'),
+                UnitSetup(id: 'medic-1', type: 'medic'),
+                UnitSetup(id: 'engineer-1', type: 'engineer'),
+                UnitSetup(id: 'scout-1', type: 'scout'),
+                UnitSetup(id: 'artillery-1', type: 'artillery'),
+                UnitSetup(id: 'radio-1', type: 'radio'),
+                UnitSetup(id: 'truck-1', type: 'truck'),
+                UnitSetup(id: 'helicopter-1', type: 'helicopter'),
+                UnitSetup(id: 'jeep-1', type: 'jeep'),
+                UnitSetup(id: 'soldier-4', type: 'soldier'),
+                UnitSetup(id: 'soldier-5', type: 'soldier'),
+                UnitSetup(id: 'camp-1', type: 'encampment'),
+              ],
+            ),
+          ],
+        ),
+        TeamSetup(
+          id: 'team-2',
+          sections: [
+            SectionSetup(
+              id: 's-2',
+              accountId: 'a-2',
+              serverManaged: serverManaged,
+              units: const [
+                UnitSetup(id: 'commander-2', type: 'commander'),
+                UnitSetup(id: 'soldier-2', type: 'soldier'),
+                UnitSetup(id: 'soldier-3', type: 'soldier'),
+              ],
+            ),
           ],
         ),
       ],
-    ),
-    TeamSetup(
-      id: 'team-2',
-      sections: [
-        SectionSetup(
-          id: 's-2',
-          accountId: 'a-2',
-          units: [
-            UnitSetup(id: 'commander-2', type: 'commander'),
-            UnitSetup(id: 'soldier-2', type: 'soldier'),
-            UnitSetup(id: 'soldier-3', type: 'soldier'),
-          ],
-        ),
-      ],
-    ),
-  ],
-);
+    );
 
 /// Where each unit stands on the field (the storage orders come in M5.12).
 const ordersPlaces = {
@@ -92,8 +95,8 @@ void deploy(Battle battle) => battle.change((state) {
 /// `a-1` has logged in, so he manages team 1's HQ (HQ-07).
 final class OrdersFixture {
   /// A fixture whose senders may send [rateLimit] orders, with the random
-  /// of [seed].
-  new({RateLimit? rateLimit, this.seed = 11}) {
+  /// of [seed]; the server runs `s-2` when [serverManaged].
+  new({RateLimit? rateLimit, this.seed = 11, this.serverManaged = false}) {
     host = SimulationHost(
       clock: clock,
       maps: MapLibrary(
@@ -105,13 +108,16 @@ final class OrdersFixture {
       wal: wal,
       rateLimit: rateLimit ?? RateLimit(perSecond: 1000, burst: 1000),
     );
-    battle = host.start(ordersSetup(seed: seed));
+    battle = host.start(ordersSetup(seed: seed, serverManaged: serverManaged));
     deploy(battle);
     send(const EnterBattle(), origin: Origin.server);
   }
 
   /// The seed of the battle's random.
   final int seed;
+
+  /// Whether the server runs `s-2`.
+  final bool serverManaged;
 
   final clock = ManualClock(DateTime.utc(2026, 11, 2, 8));
   final wal = MemoryWriteAheadLog();
@@ -185,7 +191,7 @@ String stateOf(Battle battle) => jsonEncode(
 /// and checks that it gives the same events and reaches the same battle.
 void expectReplay(OrdersFixture live, {void Function(Battle)? prepare}) {
   final battle = Battle.start(
-    setup: ordersSetup(seed: live.seed),
+    setup: ordersSetup(seed: live.seed, serverManaged: live.serverManaged),
     map: live.battle.map,
     definitions: planData,
   );

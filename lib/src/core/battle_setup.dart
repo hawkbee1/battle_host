@@ -36,8 +36,8 @@ final class UnitSetup {
 /// A section in a battle: its [id], its commander's [accountId], its
 /// [money], its section [xp] and its [units], kept between the battles of
 /// a war (UNIT-30), the [medals] its player holds, which rank him for the
-/// HQ manager role (SOC-29), and its guild, whose camp is its portal
-/// (HQ-27, HQ-38).
+/// HQ manager role (SOC-29), its guild, whose camp is its portal
+/// (HQ-27, HQ-38), and whether the server runs it (AI-06).
 /// {@endtemplate}
 final class SectionSetup {
   /// {@macro section_setup}
@@ -50,6 +50,7 @@ final class SectionSetup {
     this.medals = const {},
     this.guildId,
     this.guildChief = false,
+    this.serverManaged = false,
   });
 
   /// The section.
@@ -75,6 +76,10 @@ final class SectionSetup {
 
   /// Its units, the commander included.
   final List<UnitSetup> units;
+
+  /// Whether the server runs it (AI-06): it looks like any other section,
+  /// and the server gives its orders with the origin `server` (AI-09).
+  final bool serverManaged;
 }
 
 /// {@template team_setup}

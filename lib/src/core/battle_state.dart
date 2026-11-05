@@ -160,7 +160,8 @@ final class UnitState {
 /// {@template section_state}
 /// A section in the battle: its commander's account, its team, its guild
 /// and role there, its money, its section XP, its spare weapons
-/// (decision 151) and the end of its full storage lock (HQ-35), if any.
+/// (decision 151), the end of its full storage lock (HQ-35), if any, and
+/// whether the server runs it (AI-06).
 /// {@endtemplate}
 final class SectionState {
   /// {@macro section_state}
@@ -175,6 +176,7 @@ final class SectionState {
     this.guildChief = false,
     this.storedWeapons = const StoredWeapons([]),
     this.lockedUntil,
+    this.serverManaged = false,
   });
 
   /// The section.
@@ -207,6 +209,10 @@ final class SectionState {
   /// The battle time its lock ends; null when it is not locked.
   final Duration? lockedUntil;
 
+  /// Whether the server runs it (AI-06): nothing else tells it from the
+  /// other sections.
+  final bool serverManaged;
+
   /// This section with its lock set to [until], or lifted when null.
   SectionState lockedTo(Duration? until) => _copy(lockedUntil: () => until);
 
@@ -234,6 +240,7 @@ final class SectionState {
     guildChief: guildChief,
     storedWeapons: storedWeapons ?? this.storedWeapons,
     lockedUntil: lockedUntil == null ? this.lockedUntil : lockedUntil(),
+    serverManaged: serverManaged,
   );
 }
 

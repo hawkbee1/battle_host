@@ -107,6 +107,7 @@ _Json _timer(BattleTimer timer) => switch (timer) {
   RecallEnds(:final unitId) => {'kind': 'recallEnds', 'unit': unitId},
   CaptureEnds(:final relicId) => {'kind': 'captureEnds', 'relic': relicId},
   RelicArrives(:final relicId) => {'kind': 'relicArrives', 'relic': relicId},
+  ServerCheck(:final unitId) => {'kind': 'serverCheck', 'unit': unitId},
   HoldEnds() => {'kind': 'holdEnds'},
   FlightEnds(:final unitId, :final flying) => {
     'kind': 'flightEnds',
@@ -219,6 +220,7 @@ _Json _section(SectionState section) => {
   'chief': section.guildChief,
   'weapons': section.storedWeapons.weapons,
   ..._maybeTime('lockedUntil', section.lockedUntil),
+  'serverManaged': section.serverManaged,
 };
 
 _Json _team(TeamState team) => {
@@ -380,6 +382,7 @@ final class _Decoder {
     'recallEnds' => RecallEnds(timer.text('unit')),
     'captureEnds' => CaptureEnds(timer.text('relic')),
     'relicArrives' => RelicArrives(timer.text('relic')),
+    'serverCheck' => ServerCheck(timer.text('unit')),
     'holdEnds' => const HoldEnds(),
     'flightEnds' => FlightEnds(
       timer.text('unit'),
@@ -538,6 +541,7 @@ final class _Decoder {
     guildChief: section.flag('chief'),
     storedWeapons: StoredWeapons(List.unmodifiable(section.texts('weapons'))),
     lockedUntil: section.maybeTime('lockedUntil'),
+    serverManaged: section.flag('serverManaged'),
   );
 
   TeamState _team(_Reader team) {

@@ -5,6 +5,7 @@ import 'package:battle_host/src/orders/refusal.dart';
 import 'package:battle_host/src/orders/relics.dart';
 import 'package:battle_host/src/orders/rewards.dart';
 import 'package:battle_host/src/orders/section_orders.dart';
+import 'package:battle_host/src/orders/server_sections.dart';
 import 'package:battle_host/src/orders/world.dart';
 import 'package:battle_host/src/orders/world_changes.dart';
 import 'package:battle_pathfinding/battle_pathfinding.dart' hide PathSample;
@@ -16,6 +17,16 @@ import 'package:battle_rules/battle_rules.dart';
 
 /// The ID of [team]'s HQ as a target or a mover.
 String hqId(String team) => 'hq-$team';
+
+/// A shot's aim: its weapon, the target's cell, armor and defense, and the
+/// sight line to it.
+typedef _Aim = ({
+  WeaponType weapon,
+  CellRef cell,
+  String armor,
+  double defense,
+  SightLine line,
+});
 
 /// A route: its cells, and its samples priced by the movement cost.
 typedef _Route = ({
@@ -110,10 +121,18 @@ final class CommandHandler {
     relics: relics,
   );
 
+  /// The fire checks of the server-managed sections' units.
+  late final servers = ServerSections(
+    battle: battle,
+    world: world,
+    orders: this,
+  );
+
   late final _listeners = <BattleListener>[
     relics,
     Rewards(battle: battle, world: world),
     StorageLocks(battle),
+    servers,
   ];
 
   /// [events], which changed the state from [before], with what follows
@@ -913,16 +932,19 @@ final class CommandHandler {
 
   // Shots (COMBAT-11 to COMBAT-25, COMBAT-36 to COMBAT-41, COMBAT-55).
 
-  OrderPlan _fire(UnitState unit, String targetId, int seq) {
+  /// The aim of [unit] at [targetId], or why it cannot fire at it: no
+  /// weapon, no such target, a flying target its weapon cannot reach, out of
+  /// range or not seen (COMBAT-11 to COMBAT-13).
+  (_Aim?, Enum?) _aim(UnitState unit, String targetId) {
     final weapon = unit.weapon.weapon;
-    if (weapon == null) return refused(WeaponRefusal.noWeapon);
+    if (weapon == null) return (null, WeaponRefusal.noWeapon);
     final (cell, flying, armor, defense) = switch (_targetCell(targetId)) {
       final found? => found,
       null => (null, false, '', 0.0),
     };
-    if (cell == null) return refused(HostRule.unknownTarget);
+    if (cell == null) return (null, HostRule.unknownTarget);
     if (flying && weapon.airborneFactor == 0) {
-      return refused(HostRule.cannotHitFlying);
+      return (null, HostRule.cannotHitFlying);
     }
     final line = world.sightLine(
       unit.cell!,
@@ -930,7 +952,7 @@ final class CommandHandler {
       fromFlying: unit.flying,
       toFlying: flying,
     );
-    if (line.distanceM > weapon.rangeM) return refused(HostRule.outOfRange);
+    if (line.distanceM > weapon.rangeM) return (null, HostRule.outOfRange);
     if (!_vision.canFireAt(
       unit: unit.type,
       weapon: weapon,
@@ -939,8 +961,24 @@ final class CommandHandler {
       time: _now,
       observation: unit.observation,
     )) {
-      return refused(HostRule.targetNotSeen);
+      return (null, HostRule.targetNotSeen);
     }
+    return (
+      (weapon: weapon, cell: cell, armor: armor, defense: defense, line: line),
+      null,
+    );
+  }
+
+  /// The distance of a shot of [unit] at [targetId], or null when a `Fire`
+  /// order of [unit] at it would be refused for its aim: whether [unit]
+  /// sees it within its weapon's range (AI-07).
+  double? shotDistance(UnitState unit, String targetId) =>
+      _aim(unit, targetId).$1?.line.distanceM;
+
+  OrderPlan _fire(UnitState unit, String targetId, int seq) {
+    final (aim, refusal) = _aim(unit, targetId);
+    if (aim == null) return refused(refusal!);
+    final (:weapon, :cell, :armor, :defense, :line) = aim;
     return _shoot(unit, (shooter) {
       final roll = HitChance.roll(
         _hitChance.of(

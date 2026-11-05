@@ -12,12 +12,14 @@ final scriptStart = DateTime.utc(2026, 11, 5, 8);
 /// A host running the battle of [ordersSetup] by the [script], on the
 /// stores it is given.
 final class ScriptedHost {
-  /// A host on [clock] with these stores.
+  /// A host on [clock] with these stores; the server runs `s-2` when
+  /// [serverManaged].
   new({
     required this.clock,
     required this.wal,
     required this.logs,
     required this.snapshots,
+    this.serverManaged = false,
   }) {
     host = SimulationHost(
       clock: clock,
@@ -35,14 +37,16 @@ final class ScriptedHost {
   }
 
   /// A host on stores of its own, in memory.
-  factory alone() => ScriptedHost(
+  factory alone({bool serverManaged = false}) => ScriptedHost(
     clock: ManualClock(scriptStart),
     wal: MemoryWriteAheadLog(),
     logs: MemoryLogSink(),
     snapshots: MemorySnapshotStore(),
+    serverManaged: serverManaged,
   );
 
   final ManualClock clock;
+  final bool serverManaged;
   final WriteAheadLog wal;
   final LogSink logs;
   final SnapshotStore snapshots;
@@ -61,7 +65,7 @@ final class ScriptedHost {
   /// Starts the battle, deploys its units and sets it up by hand, logs
   /// `a-1` in, and keeps a snapshot of it there.
   Future<void> begin() async {
-    host.start(ordersSetup());
+    host.start(ordersSetup(serverManaged: serverManaged));
     deploy(battle);
     battle.change(
       (state) => state

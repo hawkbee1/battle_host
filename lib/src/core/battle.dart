@@ -105,6 +105,18 @@ final class FlightEnds extends BattleTimer {
   final bool flying;
 }
 
+/// {@template server_check}
+/// The fire check of [unitId], a unit of a server-managed section, is due
+/// (AI-07).
+/// {@endtemplate}
+final class ServerCheck extends BattleTimer {
+  /// {@macro server_check}
+  const new(this.unitId);
+
+  /// The unit.
+  final String unitId;
+}
+
 /// {@template battle_memento}
 /// What a snapshot keeps of a battle (Memento, stack decision 7): enough to
 /// restore it on its map with the shared definitions. Only `Battle` makes
@@ -224,6 +236,7 @@ final class Battle {
           medals: section.medals,
           guildId: section.guildId,
           guildChief: section.guildChief,
+          serverManaged: section.serverManaged,
         );
         for (final unit in section.units) {
           _unique(units, unit.id, 'unit');
@@ -258,7 +271,7 @@ final class Battle {
         }
       }
     }
-    return Battle._(
+    final battle = Battle._(
       id: setup.battleId,
       map: map,
       definitions: definitions,
@@ -286,6 +299,14 @@ final class Battle {
         }),
       ),
     );
+    // AI-07: each unit of a server-managed section has its fire check.
+    final check = ServerFireCheck(settings.serverManaged).interval;
+    for (final unit in units.values) {
+      if (sections[unit.sectionId]!.serverManaged) {
+        battle.schedule(check, ServerCheck(unit.id));
+      }
+    }
+    return battle;
   }
 
   /// The battle [memento] holds, on [map], the map it names, with the
@@ -373,10 +394,10 @@ final class Battle {
   /// The command handler of this battle (Facade for every sender).
   late final CommandHandler orders = CommandHandler(this);
 
-  /// Hears the events the battle makes on its own, at their time (a
-  /// waiting order carried out, a work done): the host logs them
-  /// (Observer, stack decision 7).
-  void Function(Duration at, List<BattleEvent> events)? onEvents;
+  /// Hears the entries the battle makes on its own, at their time (a
+  /// waiting order carried out, a work done, an order of a server-managed
+  /// unit's fire check): the host logs them (Observer, stack decision 7).
+  void Function(LogEntry entry)? onEntry;
 
   /// The next sequence number of an accepted command (stack decision 8).
   int takeSeq() => _nextSeq++;
@@ -447,39 +468,42 @@ final class Battle {
 
   void _fire(BattleTimer timer) {
     final before = _state;
-    final events = switch (timer) {
+    final (command, events) = switch (timer) {
       SectionUnlocks(:final sectionId) => () {
         _state = _state.withSection(
           (_state.sections[sectionId] ??
                   (throw StateError('no section $sectionId to unlock')))
               .lockedTo(null),
         );
-        return const <BattleEvent>[];
+        return (null, const <BattleEvent>[]);
       }(),
       // A waiting order hears its own consequences in the handler.
-      RunOrder(:final command) => orders.handle(command).events,
-      WorkEnds(:final unitId) => orders.react(
-        before,
-        orders.finishWork(unitId),
+      RunOrder(:final command) => (null, orders.handle(command).events),
+      WorkEnds(:final unitId) => (
+        null,
+        orders.react(before, orders.finishWork(unitId)),
       ),
-      RecallEnds(:final unitId) => orders.react(
-        before,
-        orders.sections.finishRecall(unitId),
+      RecallEnds(:final unitId) => (
+        null,
+        orders.react(before, orders.sections.finishRecall(unitId)),
       ),
-      CaptureEnds(:final relicId) => orders.react(
-        before,
-        orders.relics.finishCapture(relicId),
+      CaptureEnds(:final relicId) => (
+        null,
+        orders.react(before, orders.relics.finishCapture(relicId)),
       ),
-      RelicArrives(:final relicId) => orders.react(
-        before,
-        orders.relics.finishPush(relicId),
+      RelicArrives(:final relicId) => (
+        null,
+        orders.react(before, orders.relics.finishPush(relicId)),
       ),
-      HoldEnds() => orders.react(before, orders.relics.holdDue()),
-      FlightEnds(:final unitId, :final flying) => orders.finishFlight(
-        unitId,
-        flying: flying,
+      HoldEnds() => (null, orders.react(before, orders.relics.holdDue())),
+      FlightEnds(:final unitId, :final flying) => (
+        null,
+        orders.finishFlight(unitId, flying: flying),
       ),
+      ServerCheck(:final unitId) => orders.servers.check(unitId),
     };
-    if (events.isNotEmpty) onEvents?.call(_time, events);
+    if (command != null || events.isNotEmpty) {
+      onEntry?.call(LogEntry(at: _time, command: command, events: events));
+    }
   }
 }

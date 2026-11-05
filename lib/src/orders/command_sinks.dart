@@ -27,8 +27,7 @@ abstract interface class CommandSink {
 final class BattleCommands implements CommandSink {
   /// {@macro battle_commands}
   new({required this.battle, required this.journal}) {
-    battle.onEvents = (at, events) =>
-        journal.append(battle.id, LogEntry(at: at, events: events));
+    battle.onEntry = (entry) => journal.append(battle.id, entry);
   }
 
   /// The battle.

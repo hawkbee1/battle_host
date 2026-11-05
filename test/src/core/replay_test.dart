@@ -39,13 +39,13 @@ void main() {
   group(replay, () {
     test('makes the logged battle again', () {
       final battle = restored();
-      void listener(Duration at, List<BattleEvent> events) {}
-      battle.onEvents = listener;
+      void listener(LogEntry entry) {}
+      battle.onEntry = listener;
 
       replay(battle, log, from: snapshot.position);
 
       expect(battle.time, log.last.at);
-      expect(battle.onEvents, same(listener));
+      expect(battle.onEntry, same(listener));
     });
 
     test('stops at an entry whose events differ', () {

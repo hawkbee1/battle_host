@@ -95,6 +95,7 @@ Battle richBattle() {
             guildChief: true,
             storedWeapons: const StoredWeapons(['machine_gun']),
             lockedUntil: _s(10800),
+            serverManaged: true,
           ),
         )
         .withTeam(team1.withHolder('a-1').withManager('a-3'))
@@ -214,7 +215,8 @@ Battle richBattle() {
     ..schedule(_s(50), const CaptureEnds('relic-1'))
     ..schedule(_s(60), const RelicArrives('relic-1'))
     ..schedule(_s(70), const HoldEnds())
-    ..schedule(_s(80), const FlightEnds('helicopter-1', flying: false));
+    ..schedule(_s(80), const FlightEnds('helicopter-1', flying: false))
+    ..schedule(_s(90), const ServerCheck('soldier-2'));
   battle.random.nextDouble();
   return battle;
 }
@@ -245,7 +247,7 @@ void main() {
         equals(utf8.decode(data)),
       );
       expect(restored.time, battle.time);
-      expect(restored.timers, hasLength(8));
+      expect(restored.timers, hasLength(9));
       expect(restored.random.state, battle.random.state);
       expect(restored.takeSeq(), battle.takeSeq());
       expect(
