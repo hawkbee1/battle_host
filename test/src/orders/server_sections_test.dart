@@ -70,8 +70,8 @@ void main() {
       expect(refused.refusal!.code, equals('not_your_unit'));
     });
 
-    test('a unit it buys gets its own fire check, an interval after it '
-        'arrives', () {
+    test('decision 229 a unit it buys is first checked at the next check of '
+        'the battle', () {
       f
         ..battle.change(
           (state) =>
@@ -82,15 +82,13 @@ void main() {
           sendTwo(const BuyUnit(unitType: 'soldier')).events.first
               as UnitPurchased;
 
-      expect(
-        pendingChecks(),
-        contains((const Duration(minutes: 40), bought.unitId)),
-      );
+      expect(pendingChecks(), contains((checks, bought.unitId)));
     });
   });
 
   group('AI-07 decisions 160 196 the fire check', () {
-    test('runs for each unit every 30 minutes from the start', () {
+    test('decision 229 runs for each unit every 30 minutes from the battle '
+        'start', () {
       expect(pendingChecks(), [for (final id in serverUnits) (checks, id)]);
 
       f.wait(checks);
@@ -141,8 +139,8 @@ void main() {
       expect(pendingChecks(), hasLength(3));
     });
 
-    test('AI-08 a seeded run fires the expected shots, at the nearest enemy, '
-        'carried out like any other order', () {
+    test('AI-08 decision 228 a seeded run fires the expected shots, at the '
+        'nearest enemy, carried out like any other order', () {
       f.wait(const Duration(hours: 3));
       final fired = shots(f.entries);
 
@@ -178,7 +176,8 @@ void main() {
       expect(pendingChecks(), [(checks * 2, 'commander-2')]);
     });
 
-    test('a unit turned into the section gets its own check', () {
+    test('decision 229 a unit turned into the section is first checked at '
+        'the next check of the battle', () {
       f.wait(const Duration(minutes: 5));
       final before = f.battle.state;
       f.changeUnit('soldier-1', (unit) => unit.copyWith(sectionId: 's-2'));
@@ -202,7 +201,7 @@ void main() {
       f.battle.orders.servers.hear(const [turned], f.battle.state);
 
       expect(pendingChecks().where((check) => check.$2 == 'soldier-1'), [
-        (const Duration(minutes: 35), 'soldier-1'),
+        (checks, 'soldier-1'),
       ]);
     });
 

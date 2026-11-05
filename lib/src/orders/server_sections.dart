@@ -8,19 +8,19 @@ import 'package:battle_rules/battle_rules.dart';
 
 /// {@template server_sections}
 /// The sections the server runs (AI-06 to AI-09; decisions 159, 160, 163 to
-/// 166, 196): sections like any other, whose orders the server gives
-/// through the command handler with the origin `server`.
+/// 166, 196, 228, 229): sections like any other, whose orders the server
+/// gives through the command handler with the origin `server`.
 ///
 /// Each of their units has a fire check, a timer every `check_interval_s`
-/// ([ServerFireCheck]): when it is due, a unit on the field that sees an
-/// enemy unit within its weapon's range fires at the nearest with
-/// `fire_chance`, drawn with the battle's random. The shot is a `Fire`
-/// order, carried out and logged like any other (AI-08). Nothing is drawn
-/// when an enemy comes into range.
+/// from the battle start ([ServerFireCheck]): when it is due, a unit on the
+/// field that sees an enemy unit within its weapon's range fires at the
+/// nearest with `fire_chance`, drawn with the battle's random. The shot is
+/// a `Fire` order, carried out and logged like any other (AI-08). Nothing
+/// is drawn when an enemy comes into range.
 ///
 /// A listener (Observer): a unit that joins such a section, bought or
-/// turned, gets its own check. A unit that leaves it, or dies, has none
-/// after the one due.
+/// turned, is first checked at the next check. A unit that leaves it, or
+/// dies, has none after the one due.
 /// {@endtemplate}
 final class ServerSections implements BattleListener {
   /// {@macro server_sections}
@@ -58,7 +58,7 @@ final class ServerSections implements BattleListener {
       for (final unitId in joined) {
         if (_runs(_state.units[unitId], _state) &&
             !_runs(before.units[unitId], before)) {
-          battle.schedule(_now + _check.interval, ServerCheck(unitId));
+          battle.schedule(_check.nextAfter(_now), ServerCheck(unitId));
         }
       }
     }
@@ -76,7 +76,7 @@ final class ServerSections implements BattleListener {
     }
     final section = _state.sections[unit.sectionId]!;
     if (_state.teams[section.team]!.eliminated) return (null, const []);
-    battle.schedule(_now + _check.interval, ServerCheck(unitId));
+    battle.schedule(_check.nextAfter(_now), ServerCheck(unitId));
     final target = unit.location is Deployed ? _target(unit) : null;
     if (target == null || !_check.fires(battle.random)) {
       return (null, const []);

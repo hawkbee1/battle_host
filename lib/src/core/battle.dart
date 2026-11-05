@@ -300,7 +300,8 @@ final class Battle {
       ),
     );
     // AI-07: each unit of a server-managed section has its fire check.
-    final check = ServerFireCheck(settings.serverManaged).interval;
+    final check = ServerFireCheck(settings.serverManaged)
+        .nextAfter(Duration.zero);
     for (final unit in units.values) {
       if (sections[unit.sectionId]!.serverManaged) {
         battle.schedule(check, ServerCheck(unit.id));
