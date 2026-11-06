@@ -162,6 +162,19 @@ void main() {
       expect(() => start(valleySetup(teams: 4)), throwsArgumentError);
     });
 
+    test('UNIT-30 a section brings its spare weapons', () {
+      final battle = start(_withWeapons(const ['machine_gun', 'anti_tank']));
+
+      expect(battle.state.sections['s-1']!.storedWeapons.weapons, [
+        'machine_gun',
+        'anti_tank',
+      ]);
+      expect(
+        () => start(_withWeapons(const ['catapult'])),
+        throwsArgumentError,
+      );
+    });
+
     test('refuses an unknown unit type and a repeated ID', () {
       BattleSetup withUnits(List<UnitSetup> units, {String section = 's-2'}) =>
           BattleSetup(
@@ -332,3 +345,22 @@ extension on BattleSetup {
         teams: change(teams),
       );
 }
+
+BattleSetup _withWeapons(List<String> weapons) => BattleSetup(
+  battleId: 'b',
+  mapId: 'valley',
+  seed: 1,
+  settings: planData.battle,
+  teams: [
+    TeamSetup(
+      id: 'red',
+      sections: [
+        SectionSetup(id: 's-1', accountId: 'a', units: [], weapons: weapons),
+      ],
+    ),
+    const TeamSetup(
+      id: 'blue',
+      sections: [SectionSetup(id: 's-2', accountId: 'b', units: [])],
+    ),
+  ],
+);

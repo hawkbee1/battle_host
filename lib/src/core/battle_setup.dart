@@ -34,10 +34,10 @@ final class UnitSetup {
 
 /// {@template section_setup}
 /// A section in a battle: its [id], its commander's [accountId], its
-/// [money], its section [xp] and its [units], kept between the battles of
-/// a war (UNIT-30), the [medals] its player holds, which rank him for the
-/// HQ manager role (SOC-29), its guild, whose camp is its portal
-/// (HQ-27, HQ-38), and whether the server runs it (AI-06).
+/// [money], its section [xp], its spare [weapons] and its [units], kept
+/// between the battles of a war (UNIT-30), the [medals] its player holds,
+/// which rank him for the HQ manager role (SOC-29), its guild, whose camp
+/// is its portal (HQ-27, HQ-38), and whether the server runs it (AI-06).
 /// {@endtemplate}
 final class SectionSetup {
   /// {@macro section_setup}
@@ -47,6 +47,7 @@ final class SectionSetup {
     required this.units,
     this.money = 0,
     this.xp = 0,
+    this.weapons = const [],
     this.medals = const {},
     this.guildId,
     this.guildChief = false,
@@ -73,6 +74,9 @@ final class SectionSetup {
 
   /// Its section XP (UNIT-14).
   final double xp;
+
+  /// Its spare weapons, by weapon type, one entry per weapon (COMBAT-27).
+  final List<String> weapons;
 
   /// Its units, the commander included.
   final List<UnitSetup> units;

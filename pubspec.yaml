@@ -9,11 +9,13 @@ environment:
 
 dependencies:
   args: ^2.7.0
+  battle_backend: ^0.1.0
   battle_map: ^0.1.0
   battle_pathfinding: ^0.1.0
   battle_protocol: ^0.1.0
   battle_rules: ^0.1.0
   dart_appwrite: ^31.1.0
+  hawkbee_schema: ^0.1.0
   mason_logger: ^0.3.5
   sentry: ^10.3.0
 
