@@ -1,0 +1,38 @@
+# The simulation host next to the local Appwrite (stack decision 1,
+# hosting). One service per map: each container claims the running battles
+# of its map (`battles.host` = its hostname) and runs them.
+#
+#   APPWRITE_API_KEY=<key with tables and storage scopes> \
+#     docker compose -f docker/compose.yaml up -d
+#
+# The local Appwrite is on `hermes-net` (docs/project-setup.md, section 6),
+# reached as http://appwrite/v1. Live, point APPWRITE_ENDPOINT at the
+# Appwrite Cloud project.
+name: battle_host
+
+services:
+  host-saint-lo:
+    image: battle_host
+    hostname: host-saint-lo
+    command: ["--map", "saint_lo"]
+    environment:
+      APPWRITE_ENDPOINT: ${APPWRITE_ENDPOINT:-http://appwrite/v1}
+      APPWRITE_PROJECT_ID: ${APPWRITE_PROJECT_ID:-hawkbee}
+      APPWRITE_API_KEY: ${APPWRITE_API_KEY:?set APPWRITE_API_KEY}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
+    volumes:
+      - wal-saint-lo:/data
+    # A stop snapshots every battle and waits for the uploads.
+    stop_grace_period: 60s
+    restart: unless-stopped
+    networks:
+      - appwrite
+
+volumes:
+  wal-saint-lo:
+
+networks:
+  appwrite:
+    name: ${APPWRITE_NETWORK:-hermes-net}
+    external: true

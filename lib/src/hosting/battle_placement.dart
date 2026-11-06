@@ -188,17 +188,19 @@ final class BattlePlacement {
 
 /// What each section of [battle], which has ended, keeps (UNIT-30): its
 /// money, section XP, spare weapons and units still in the battle, each with
-/// its XP, tree and weapon (null for its type's default). The XP each
-/// section's units earned is counted against [setup], the battle's start:
-/// units that died since are not counted (SOC-47).
+/// its XP, tree and weapon (null for its type's default).
+///
+/// The XP each section's units earned in the battle, the dead included,
+/// comes from its section XP, which takes `section_xp_share` of every XP
+/// point (UNIT-14): its gain since [setup], the battle's start, over that
+/// share (SOC-47). With no setup, all its section XP counts.
 BattleResult resultOf(Battle battle, BattleSetup? setup) {
   final state = battle.state;
-  final before = {
+  final share = battle.definitions.units.progression.sectionXpShare;
+  final start = {
     for (final team in setup?.teams ?? const <TeamSetup>[])
-      for (final section in team.sections)
-        for (final unit in section.units) unit.id: unit.xp.earned,
+      for (final section in team.sections) section.id: section.xp,
   };
-  final earned = <String, double>{};
   final units = <String, List<KeptUnit>>{};
   for (final unit in state.units.values) {
     final weapon = unit.weapon.weapon?.id;
@@ -215,8 +217,6 @@ BattleResult resultOf(Battle battle, BattleSetup? setup) {
         weapon: weapon == unit.type.weapons.defaultWeapon ? null : weapon,
       ),
     );
-    earned[unit.sectionId] =
-        (earned[unit.sectionId] ?? 0) + unit.xp.earned - (before[unit.id] ?? 0);
   }
   return BattleResult(
     winner: state.victory!.winner!.team,
@@ -231,7 +231,9 @@ BattleResult resultOf(Battle battle, BattleSetup? setup) {
     },
     earned: {
       for (final section in state.sections.values)
-        section.id: earned[section.id] ?? 0,
+        section.id: share == 0
+            ? 0
+            : (section.xp - (start[section.id] ?? 0)) / share,
     },
   );
 }

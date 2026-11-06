@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:battle_backend/battle_backend.dart';
 import 'package:battle_host/battle_host.dart';
 import 'package:battle_rules/battle_rules.dart';
@@ -257,6 +259,7 @@ void main() {
                 xp: const UnitXp(earned: 20, unspent: 11),
               ),
             )
+            .withSection(state.sections['s-1']!.withWallet(xp: 42))
             .withVictory(
               VictoryState(
                 relicOwners: state.victory!.relicOwners,
@@ -278,9 +281,11 @@ void main() {
       );
       final result = row.result!;
       expect(result.winner, 'team-1');
-      expect(result.earned, {'s-1': 8.0, 's-2': 0.0});
+      // 2 section XP is the 20 % share of 10 XP its units earned (UNIT-14).
+      expect(result.earned['s-1'], closeTo(10, 1e-9));
+      expect(result.earned['s-2'], 0);
       final s1 = result.sections['s-1']!;
-      expect((s1.money, s1.xp), (700, 40.0));
+      expect((s1.money, s1.xp), (700, 42.0));
       expect(s1.weapons, ['anti_tank']);
       final c1 = s1.units.single;
       expect(c1.toJson(), {
@@ -315,8 +320,8 @@ void main() {
   });
 
   group('resultOf', () {
-    test('UNIT-30 counts all the XP of a battle with no setup as earned in '
-        'it', () async {
+    test('SOC-47 counts all the section XP of a battle with no setup as '
+        'earned in it, and none with no section share', () async {
       final rows = await warRows();
       final host = hostOn();
       await placementOf(rows, host).sync();
@@ -334,7 +339,28 @@ void main() {
       final result = resultOf(battle, null);
 
       expect(result.winner, 'team-2');
-      expect(result.earned, {'s-1': 12.0, 's-2': 0.0});
+      expect(result.earned['s-1'], closeTo(200, 1e-9));
+      expect(result.earned['s-2'], 0);
+
+      final units = File('$planPath/data/units.yaml').readAsStringSync();
+      final withoutShare = GameData.parse(
+        units: units.replaceFirst(
+          'section_xp_share: 0.2',
+          'section_xp_share: 0',
+        ),
+        combat: File('$planPath/data/combat.yaml').readAsStringSync(),
+        terrain: File('$planPath/data/terrain.yaml').readAsStringSync(),
+        battle: File('$planPath/data/battle.yaml').readAsStringSync(),
+        economy: File('$planPath/milestones/economy.yaml').readAsStringSync(),
+        medals: File('$planPath/data/medals.yaml').readAsStringSync(),
+      );
+      expect(withoutShare.units.progression.sectionXpShare, 0);
+      final shareless = Battle.restore(
+        battle.save(),
+        map: battle.map,
+        definitions: withoutShare,
+      );
+      expect(resultOf(shareless, null).earned, {'s-1': 0.0, 's-2': 0.0});
     });
   });
 }
