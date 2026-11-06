@@ -237,7 +237,13 @@ final class Battle {
           guildId: section.guildId,
           guildChief: section.guildChief,
           serverManaged: section.serverManaged,
+          storedWeapons: StoredWeapons(List.unmodifiable(section.weapons)),
         );
+        for (final weapon in section.weapons) {
+          if (!definitions.combat.weaponTypes.containsKey(weapon)) {
+            throw ArgumentError.value(weapon, 'weapons', 'no such weapon');
+          }
+        }
         for (final unit in section.units) {
           _unique(units, unit.id, 'unit');
           final base =
