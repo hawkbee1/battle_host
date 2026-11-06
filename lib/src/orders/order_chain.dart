@@ -86,6 +86,9 @@ final class SenderCheck implements OrderCheck {
 
   @override
   OrderRefusal? check(OrderCheckContext context) {
+    if (context.state.ended) {
+      return const SenderRefused(SenderProblem.battleOver);
+    }
     final sender = context.command.sender;
     final section = context.state.sections[sender.sectionId];
     if (section == null) {
@@ -121,7 +124,12 @@ final class RightCheck implements OrderCheck {
         if (unit.sectionId != section.id) {
           return const RightRefused(RightProblem.notYourUnit);
         }
-        if (!unit.onField) return const RightRefused(RightProblem.notOnField);
+        // A stored unit deploys and buys tree nodes (HQ-33, UNIT-18).
+        if (!unit.onField &&
+            context.command.order is! Deploy &&
+            context.command.order is! BuyNode) {
+          return const RightRefused(RightProblem.notOnField);
+        }
         context.unit = unit;
       case MoveHq():
         final manager = context.state.teams[section.team]!.managerAccountId;
@@ -175,3 +183,15 @@ final class ApCheck implements OrderCheck {
     _ => null,
   };
 }
+
+/// A plan refused by a rule: [reason] is a refusal of the rules core or a
+/// [HostRule].
+OrderPlan refused(Enum reason) => PlanRefused(RuleRefused(reason));
+
+/// A plan that applies [apply] at [at]: now when [at] is not after [now],
+/// otherwise once the wait ends (COMBAT-06).
+OrderPlan planAt(
+  Duration at,
+  Duration now,
+  List<BattleEvent> Function() apply,
+) => at > now ? PlanWaits(at) : PlanReady(apply);

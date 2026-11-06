@@ -292,11 +292,11 @@ void main() {
   group('no order, no action', () {
     test('AI-01 decision 156 a unit without an order does nothing, even with '
         'an enemy in sight', () {
-      final before = fingerprint(f.battle.state);
+      final before = stateOf(f.battle);
 
       f.wait(const Duration(hours: 3));
       expect(f.entries.where((entry) => entry.command == null), isEmpty);
-      expect(fingerprint(f.battle.state), equals(before));
+      expect(stateOf(f.battle), equals(before));
     });
 
     test(
@@ -366,6 +366,38 @@ void main() {
         refusalOf(MoveHq(to: centreOf(f.battle, const CellRef(1, 0)))),
         equals('not_manager'),
       );
+    });
+
+    test('HQ-07 decision 227 a player who logs in takes the role from a '
+        'delegate only by ranking above the player who would hold it', () {
+      join('s-1', 'a-1', {'silver': 1});
+      join('s-3', 'a-3', {'gold': 1});
+      join('s-4', 'a-4', {});
+      join('s-5', 'a-5', {'bronze': 1});
+      expect(
+        eventsOf(const DelegateHq(accountId: 'a-4')),
+        equals([const ManagerChanged(team: 'team-1', accountId: 'a-4')]),
+      );
+
+      // a-5 ranks above the delegate a-4, not above a-1.
+      expect(logIn('s-5', 'a-5'), isEmpty);
+      expect(logIn('s-1', 'a-1'), isEmpty);
+      expect(f.battle.state.teams['team-1']!.managerAccountId, 'a-4');
+      expect(
+        logIn('s-3', 'a-3'),
+        equals([const ManagerChanged(team: 'team-1', accountId: 'a-3')]),
+      );
+      expect(f.battle.state.teams['team-1']!.holderAccountId, 'a-3');
+    });
+
+    test('decision 227 the holder delegated to who logs in later keeps the '
+        'role, as its holder', () {
+      join('s-4', 'a-4', {'gold': 1});
+      eventsOf(const DelegateHq(accountId: 'a-4'));
+
+      expect(logIn('s-4', 'a-4'), isEmpty);
+      final team = f.battle.state.teams['team-1']!;
+      expect((team.managerAccountId, team.holderAccountId), ('a-4', 'a-4'));
     });
 
     test('decision 220 only the server tells that a player logs in', () {
@@ -596,16 +628,16 @@ void main() {
       place('soldier-1', const CellRef(7, 2));
       place('soldier-2', const CellRef(9, 2));
       f.wait(const Duration(seconds: 2));
-      final wall =
-          eventsOf(
-                FireAimed(
-                  unitId: 'soldier-1',
-                  aim: Direction.of(1, 0, 0),
-                  fireTime: f.battle.time,
-                ),
-              ).single
-              as Attacked;
-      expect(wall.hit, isFalse);
+      final events = eventsOf(
+        FireAimed(
+          unitId: 'soldier-1',
+          aim: Direction.of(1, 0, 0),
+          fireTime: f.battle.time,
+        ),
+      );
+      expect((events.first as Attacked).hit, isFalse);
+      // MAP-10: the building that stopped the shot takes its hit.
+      expect((events.last as ObjectDamaged).object, equals('building'));
     });
 
     group('COMBAT-38 the final blow of a commander', () {
@@ -675,6 +707,49 @@ void main() {
 
       test('UNIT-39 takes it prisoner instead when the section is full', () {
         expect(finalBlow(1, room: false), ImpactResult.prisoner);
+      });
+
+      test('UNIT-05 ECO-18 decision 223 a prisoner or a defection earns the '
+          'kill XP but not its money', () {
+        final fresh = OrdersFixture();
+        final attackerXp = fresh.unit('commander-1').xp.earned;
+        final targetXp = fresh.unit('soldier-2').xp.earned;
+        final rules = XpRules(planData.units.progression);
+        double earn(XpEvent event) =>
+            rules.earn(event, history: XpHistory(), at: Duration.zero).xp;
+        final hitAndKill = rules
+            .split(
+              earn(
+                    HitXp(
+                      targetId: 'soldier-2',
+                      attackerXp: attackerXp,
+                      targetXp: targetXp,
+                    ),
+                  ) +
+                  earn(
+                    KillXp(
+                      targetId: 'soldier-2',
+                      attackerXp: attackerXp,
+                      targetXp: targetXp,
+                    ),
+                  ),
+            )
+            .unit;
+
+        for (final (seed, result) in [
+          (11, ImpactResult.prisoner),
+          (1, ImpactResult.defected),
+        ]) {
+          expect(finalBlow(seed, room: true), result);
+          expect(
+            f.unit('commander-1').xp.earned,
+            closeTo(attackerXp + hitAndKill, 1e-9),
+          );
+          expect(
+            f.battle.state.sections['s-1']!.money,
+            equals(planData.economy.earnings.hit),
+          );
+        }
       });
     });
 
@@ -1076,7 +1151,7 @@ void main() {
           ),
         ]),
       );
-      expect(f.battle.state.structures, contains('wall@(3, 4)'));
+      expect(f.battle.state.delta.built, contains('wall@(3, 4)'));
       expect(f.unit('engineer-1').work, isNull);
     });
 
@@ -1289,7 +1364,9 @@ void main() {
         expect(added.potAp, equals(5.0 * i));
         f.wait(const Duration(hours: 3));
       }
-      expect(f.battle.state.relics['relic-1']!.capturePot!.fullAt, isNotNull);
+      // Full, then captured 30 minutes later (RELIC-05).
+      final relic = f.battle.state.relics['relic-1']!;
+      expect((relic.owner, relic.capturePot), equals(('team-1', null)));
     });
 
     test('RELIC-06 a capture is refused with an enemy in the radius, outside '

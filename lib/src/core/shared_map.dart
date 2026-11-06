@@ -68,6 +68,17 @@ final class SharedMap {
 
   final _searches = <(double, String), GroundSearch>{};
 
+  /// The map's objects, constructions and links on each of their cells.
+  late final Map<CellRef, List<MapObject>> objectsByCell = () {
+    final byCell = <CellRef, List<MapObject>>{};
+    for (final object in host.objects.values) {
+      for (final cell in object.cells) {
+        byCell.putIfAbsent(cell, () => []).add(object);
+      }
+    }
+    return byCell;
+  }();
+
   /// The path rules: the flying altitude limit is the map's highest point
   /// plus `flying_max_above_highest_terrain_m` (decision 142).
   PathRules get rules => grid.rules;

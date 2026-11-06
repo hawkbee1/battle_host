@@ -35,8 +35,9 @@ final class UnitSetup {
 /// {@template section_setup}
 /// A section in a battle: its [id], its commander's [accountId], its
 /// [money], its section [xp] and its [units], kept between the battles of
-/// a war (UNIT-30), and the [medals] its player holds, which rank him for
-/// the HQ manager role (SOC-29).
+/// a war (UNIT-30), the [medals] its player holds, which rank him for the
+/// HQ manager role (SOC-29), its guild, whose camp is its portal
+/// (HQ-27, HQ-38), and whether the server runs it (AI-06).
 /// {@endtemplate}
 final class SectionSetup {
   /// {@macro section_setup}
@@ -47,10 +48,19 @@ final class SectionSetup {
     this.money = 0,
     this.xp = 0,
     this.medals = const {},
+    this.guildId,
+    this.guildChief = false,
+    this.serverManaged = false,
   });
 
   /// The section.
   final String id;
+
+  /// Its guild; null without one.
+  final String? guildId;
+
+  /// Whether its player is the guild's chief (SOC-50).
+  final bool guildChief;
 
   /// The medals its player holds, by tier (`medals.yaml` `tiers`).
   final Map<String, int> medals;
@@ -66,6 +76,10 @@ final class SectionSetup {
 
   /// Its units, the commander included.
   final List<UnitSetup> units;
+
+  /// Whether the server runs it (AI-06): it looks like any other section,
+  /// and the server gives its orders with the origin `server` (AI-09).
+  final bool serverManaged;
 }
 
 /// {@template team_setup}
@@ -95,7 +109,12 @@ final class BattleSetup {
     required this.seed,
     required this.settings,
     required this.teams,
+    this.minStartingMoney,
   });
+
+  /// The money floor of its war's sections (SOC-10, ECO-13); null for
+  /// `economy.yaml`'s `min_starting_money`.
+  final int? minStartingMoney;
 
   /// The battle.
   final String battleId;

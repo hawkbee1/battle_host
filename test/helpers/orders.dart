@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:battle_host/battle_host.dart';
 import 'package:battle_pathfinding/battle_pathfinding.dart';
 import 'package:battle_protocol/battle_protocol.dart';
@@ -6,55 +8,60 @@ import 'package:test/test.dart';
 
 import 'fixtures.dart';
 
-/// Two teams on the valley. Team 1 (`s-1` of `a-1`) has one unit of most
-/// types; team 2 (`s-2` of `a-2`) has a commander and two soldiers.
+/// Two teams on the valley. Team 1 (`s-1` of `a-1`, 1000 w€) has one unit
+/// of most types; team 2 (`s-2` of `a-2`, no money) has a commander and two
+/// soldiers.
 /// `soldier-4`, `soldier-5` and the guild camp `camp-1` stay in storage.
-BattleSetup ordersSetup({int seed = 11}) => BattleSetup(
-  battleId: 'b-1',
-  mapId: 'valley',
-  seed: seed,
-  settings: planData.battle,
-  teams: const [
-    TeamSetup(
-      id: 'team-1',
-      sections: [
-        SectionSetup(
-          id: 's-1',
-          accountId: 'a-1',
-          units: [
-            UnitSetup(id: 'commander-1', type: 'commander'),
-            UnitSetup(id: 'soldier-1', type: 'soldier'),
-            UnitSetup(id: 'medic-1', type: 'medic'),
-            UnitSetup(id: 'engineer-1', type: 'engineer'),
-            UnitSetup(id: 'scout-1', type: 'scout'),
-            UnitSetup(id: 'artillery-1', type: 'artillery'),
-            UnitSetup(id: 'radio-1', type: 'radio'),
-            UnitSetup(id: 'truck-1', type: 'truck'),
-            UnitSetup(id: 'helicopter-1', type: 'helicopter'),
-            UnitSetup(id: 'jeep-1', type: 'jeep'),
-            UnitSetup(id: 'soldier-4', type: 'soldier'),
-            UnitSetup(id: 'soldier-5', type: 'soldier'),
-            UnitSetup(id: 'camp-1', type: 'encampment'),
+/// The server runs `s-2` when [serverManaged] (AI-06).
+BattleSetup ordersSetup({int seed = 11, bool serverManaged = false}) =>
+    BattleSetup(
+      battleId: 'b-1',
+      mapId: 'valley',
+      seed: seed,
+      settings: planData.battle,
+      teams: [
+        const TeamSetup(
+          id: 'team-1',
+          sections: [
+            SectionSetup(
+              id: 's-1',
+              accountId: 'a-1',
+              money: 1000,
+              units: [
+                UnitSetup(id: 'commander-1', type: 'commander'),
+                UnitSetup(id: 'soldier-1', type: 'soldier'),
+                UnitSetup(id: 'medic-1', type: 'medic'),
+                UnitSetup(id: 'engineer-1', type: 'engineer'),
+                UnitSetup(id: 'scout-1', type: 'scout'),
+                UnitSetup(id: 'artillery-1', type: 'artillery'),
+                UnitSetup(id: 'radio-1', type: 'radio'),
+                UnitSetup(id: 'truck-1', type: 'truck'),
+                UnitSetup(id: 'helicopter-1', type: 'helicopter'),
+                UnitSetup(id: 'jeep-1', type: 'jeep'),
+                UnitSetup(id: 'soldier-4', type: 'soldier'),
+                UnitSetup(id: 'soldier-5', type: 'soldier'),
+                UnitSetup(id: 'camp-1', type: 'encampment'),
+              ],
+            ),
+          ],
+        ),
+        TeamSetup(
+          id: 'team-2',
+          sections: [
+            SectionSetup(
+              id: 's-2',
+              accountId: 'a-2',
+              serverManaged: serverManaged,
+              units: const [
+                UnitSetup(id: 'commander-2', type: 'commander'),
+                UnitSetup(id: 'soldier-2', type: 'soldier'),
+                UnitSetup(id: 'soldier-3', type: 'soldier'),
+              ],
+            ),
           ],
         ),
       ],
-    ),
-    TeamSetup(
-      id: 'team-2',
-      sections: [
-        SectionSetup(
-          id: 's-2',
-          accountId: 'a-2',
-          units: [
-            UnitSetup(id: 'commander-2', type: 'commander'),
-            UnitSetup(id: 'soldier-2', type: 'soldier'),
-            UnitSetup(id: 'soldier-3', type: 'soldier'),
-          ],
-        ),
-      ],
-    ),
-  ],
-);
+    );
 
 /// Where each unit stands on the field (the storage orders come in M5.12).
 const ordersPlaces = {
@@ -88,8 +95,8 @@ void deploy(Battle battle) => battle.change((state) {
 /// `a-1` has logged in, so he manages team 1's HQ (HQ-07).
 final class OrdersFixture {
   /// A fixture whose senders may send [rateLimit] orders, with the random
-  /// of [seed].
-  new({RateLimit? rateLimit, this.seed = 11}) {
+  /// of [seed]; the server runs `s-2` when [serverManaged].
+  new({RateLimit? rateLimit, this.seed = 11, this.serverManaged = false}) {
     host = SimulationHost(
       clock: clock,
       maps: MapLibrary(
@@ -98,10 +105,10 @@ final class OrdersFixture {
       ),
       definitions: planData,
       reporter: RecordingErrorReporter(),
-      log: log,
+      wal: wal,
       rateLimit: rateLimit ?? RateLimit(perSecond: 1000, burst: 1000),
     );
-    battle = host.start(ordersSetup(seed: seed));
+    battle = host.start(ordersSetup(seed: seed, serverManaged: serverManaged));
     deploy(battle);
     send(const EnterBattle(), origin: Origin.server);
   }
@@ -109,13 +116,17 @@ final class OrdersFixture {
   /// The seed of the battle's random.
   final int seed;
 
+  /// Whether the server runs `s-2`.
+  final bool serverManaged;
+
   final clock = ManualClock(DateTime.utc(2026, 11, 2, 8));
-  final log = MemoryLogSink();
+  final wal = MemoryWriteAheadLog();
   late final SimulationHost host;
   late final Battle battle;
 
-  /// The battle's log.
-  List<LogEntry> get entries => log.logOf('b-1');
+  /// The battle's log after its start entry: the entries of its orders and
+  /// its timers.
+  List<LogEntry> get entries => wal.read('b-1').entries.sublist(1);
 
   /// Sends [order] from [section] of [account], signed in as [origin].
   HandledOrder send(
@@ -166,90 +177,29 @@ Position centreOf(Battle battle, CellRef cell) {
   return Position.metres(point.x, point.y, point.z);
 }
 
-/// A description of everything [state] holds, to compare two states.
-String fingerprint(BattleState state) {
-  final lines = <String>[
-    'weather ${state.weather}',
-    for (final unit in state.units.values)
-      [
-        unit.id,
-        unit.sectionId,
-        unit.location.runtimeType,
-        unit.cell,
-        unit.pool.value,
-        unit.pool.updatedAt,
-        unit.health.current,
-        unit.morale,
-        unit.weapon.weapon?.id,
-        unit.weapon.rounds,
-        unit.weapon.loaded,
-        unit.weapon.busyUntil,
-        unit.weapon.nextShotAt,
-        unit.flying,
-        unit.movingUntil,
-        unit.work?.workId,
-        unit.work?.action.progress,
-        unit.observation?.startedAt,
-      ].join(' '),
-    for (final section in state.sections.values)
-      '${section.id} ${section.storedWeapons.weapons} ${section.lockedUntil}',
-    for (final team in state.teams.values)
-      [
-        team.id,
-        team.hq.cell,
-        team.hq.health.current,
-        team.hq.pool.value,
-        team.hq.movingUntil,
-        team.managerAccountId,
-      ].join(' '),
-    for (final relic in state.relics.values)
-      [
-        relic.id,
-        relic.owner,
-        relic.capturePot?.contributions,
-        relic.pushPot?.ap,
-        relic.pushPath,
-      ].join(' '),
-    for (final dropped in state.dropped.values)
-      '${dropped.id} ${dropped.dropped.weapon.id} ${dropped.cell}',
-    for (final MapEntry(:key, :value) in state.structures.entries)
-      '$key ${value.$1} ${value.$2}',
-  ];
-  return lines.join('\n');
-}
+/// Everything [battle] holds, as its snapshot writes it: its state, time,
+/// timers, random and sequence numbers.
+String snapshotOf(Battle battle) =>
+    utf8.decode(encodeSnapshot(battle.save(), startedAt: DateTime.utc(2026)));
+
+/// The state of [battle], as its snapshot writes it.
+String stateOf(Battle battle) => jsonEncode(
+  (jsonDecode(snapshotOf(battle)) as Map<String, Object?>)['state'],
+);
 
 /// Replays the log of [live] on a new battle of the same setup, deployed
 /// and changed by [prepare] as the live one was before its first order,
-/// and checks that it gives the same events and reaches the same state.
+/// and checks that it gives the same events and reaches the same battle.
 void expectReplay(OrdersFixture live, {void Function(Battle)? prepare}) {
   final battle = Battle.start(
-    setup: ordersSetup(seed: live.seed),
+    setup: ordersSetup(seed: live.seed, serverManaged: live.serverManaged),
     map: live.battle.map,
     definitions: planData,
   );
   deploy(battle);
   prepare?.call(battle);
-  final own = <LogEntry>[];
-  battle.onEvents = (at, events) => own.add(LogEntry(at: at, events: events));
-  final replayed = <LogEntry>[];
-  for (final entry in live.entries) {
-    final command = entry.command;
-    if (command == null) continue;
-    battle.advanceTo(entry.at);
-    replayed
-      ..addAll(own)
-      ..add(
-        LogEntry(
-          at: entry.at,
-          command: command,
-          events: battle.orders.handle(command).events,
-        ),
-      );
-    own.clear();
-  }
+  replay(battle, live.entries, from: 1);
   battle.advanceTo(live.battle.time);
-  replayed.addAll(own);
 
-  expect(replayed, equals(live.entries));
-  expect(fingerprint(battle.state), equals(fingerprint(live.battle.state)));
+  expect(snapshotOf(battle), equals(snapshotOf(live.battle)));
 }

@@ -2,7 +2,12 @@ import 'package:battle_host/src/core/battle.dart';
 import 'package:battle_host/src/core/battle_state.dart';
 import 'package:battle_host/src/orders/order_chain.dart';
 import 'package:battle_host/src/orders/refusal.dart';
+import 'package:battle_host/src/orders/relics.dart';
+import 'package:battle_host/src/orders/rewards.dart';
+import 'package:battle_host/src/orders/section_orders.dart';
+import 'package:battle_host/src/orders/server_sections.dart';
 import 'package:battle_host/src/orders/world.dart';
+import 'package:battle_host/src/orders/world_changes.dart';
 import 'package:battle_pathfinding/battle_pathfinding.dart' hide PathSample;
 import 'package:battle_pathfinding/battle_pathfinding.dart'
     as nav
@@ -13,111 +18,22 @@ import 'package:battle_rules/battle_rules.dart';
 /// The ID of [team]'s HQ as a target or a mover.
 String hqId(String team) => 'hq-$team';
 
-/// The category of a guild camp, which never reaches a floating island
-/// (MAP-38, decision 88).
-const _encampment = 'encampment';
-
-/// The category of a section's commander (UNIT-24).
-const _commander = 'commander';
+/// A shot's aim: its weapon, the target's cell, armor and defense, and the
+/// sight line to it.
+typedef _Aim = ({
+  WeaponType weapon,
+  CellRef cell,
+  String armor,
+  double defense,
+  SightLine line,
+});
 
 /// A route: its cells, and its samples priced by the movement cost.
-typedef _Route = ({List<CellRef> cells, List<PathSample> samples});
-
-/// The host's own reasons to refuse an order, beside those of the rules
-/// core.
-enum HostRule {
-  /// The position or cell is off the map.
-  offMap,
-
-  /// No path reaches the goal.
-  noPath,
-
-  /// The client's path does not start where the mover stands.
-  pathNotFromMover,
-
-  /// A carried unit does not move on its own.
-  carried,
-
-  /// Its loaded weapon forbids moving (`move_while_loaded`).
-  weaponLoaded,
-
-  /// A scout cannot move while it observes (UNIT-34).
-  observing,
-
-  /// The battle has no such target.
-  unknownTarget,
-
-  /// The target is out of the weapon's range.
-  outOfRange,
-
-  /// The unit does not see its target itself (COMBAT-11).
-  targetNotSeen,
-
-  /// The weapon cannot hit a flying target (COMBAT-25).
-  cannotHitFlying,
-
-  /// The weapon does not fire at a position (COMBAT-12, COMBAT-55).
-  notIndirect,
-
-  /// Nobody of the section sees the position and no scout reports it
-  /// through a radio (COMBAT-12).
-  positionNotSeen,
-
-  /// The weapon is not aimed in first person (decision 183).
-  notAimed,
-
-  /// The battle has no such dropped weapon.
-  unknownDropped,
-
-  /// The unit is not where the weapon lies (COMBAT-30).
-  notOnTheSpot,
-
-  /// The unit cannot fly.
-  cannotFly,
-
-  /// It is not flying.
-  notFlying,
-
-  /// It is flying already.
-  alreadyFlying,
-
-  /// The target is not a transport.
-  notATransport,
-
-  /// The unit cannot be carried (UNIT-36: radios).
-  notTransportable,
-
-  /// The unit weighs more than the transport takes per unit (UNIT-37).
-  tooHeavy,
-
-  /// The transport carries all the weight it can (UNIT-37).
-  transportFull,
-
-  /// The unit is not carried.
-  notCarried,
-
-  /// The transport is flying.
-  transportFlying,
-
-  /// The target is further than the unit reaches.
-  tooFar,
-
-  /// An encampment never goes onto a floating island (MAP-38).
-  islandUnreachable,
-
-  /// No interrupted build or repair has that ID.
-  unknownWork,
-
-  /// The battle has no such relic.
-  unknownRelic,
-
-  /// The team owns the relic already.
-  alreadyOwned,
-
-  /// The order belongs to a later part of the host (storage, purchases,
-  /// prisoners, delegation).
-  notAvailableYet,
-}
+typedef _Route = ({
+  List<CellRef> cells,
+  List<PathSample> samples,
+  List<CellRef> falls,
+});
 
 /// {@template command_handler}
 /// The command handler of one battle: every order of every sender goes
@@ -132,7 +48,7 @@ final class CommandHandler {
   new(this.battle)
     : _combat = battle.definitions.combat,
       _terrain = battle.definitions.terrain,
-      world = World(map: battle.map, terrain: battle.definitions.terrain);
+      world = World(battle: battle.world, terrain: battle.definitions.terrain);
 
   /// The battle.
   final Battle battle;
@@ -159,7 +75,9 @@ final class CommandHandler {
   late final _cost = MovementCost(_terrain);
   late final _pushing = PushingRules(push: _combat.push, cost: _cost);
   late final _firstPerson = FirstPersonShots(_combat);
-  late final _levels = SectionLevel(battle.definitions.units.progression);
+
+  /// The orders of a section about its units and money.
+  late final sections = SectionOrders(battle: battle, world: world);
   late final _teams = TeamRules(
     battle: battle.settings,
     medals: battle.definitions.medals,
@@ -189,7 +107,44 @@ final class CommandHandler {
         events: [OrderDelayed(seq: command.seq!, until: until)],
       );
     }
-    return HandledOrder(events: (plan as PlanReady).apply());
+    final before = _state;
+    return HandledOrder(events: react(before, (plan as PlanReady).apply()));
+  }
+
+  /// Relics, eliminations and the end of the battle.
+  late final relics = Relics(battle: battle, world: world, orders: this);
+
+  /// The world's changes: constructions, damaged objects, craters.
+  late final worlds = WorldChanges(
+    battle: battle,
+    world: world,
+    relics: relics,
+  );
+
+  /// The fire checks of the server-managed sections' units.
+  late final servers = ServerSections(
+    battle: battle,
+    world: world,
+    orders: this,
+  );
+
+  late final _listeners = <BattleListener>[
+    relics,
+    Rewards(battle: battle, world: world),
+    StorageLocks(battle),
+    servers,
+  ];
+
+  /// [events], which changed the state from [before], with what follows
+  /// from them: pushes, captures and eliminations, then XP and money, then
+  /// locks (Observer). Each listener hears the events of those before it.
+  List<BattleEvent> react(BattleState before, List<BattleEvent> events) {
+    if (events.isEmpty) return events;
+    final all = [...events];
+    for (final listener in _listeners) {
+      all.addAll(listener.hear(List.unmodifiable(all), before));
+    }
+    return all;
   }
 
   OrderPlan _plan(OrderCheckContext context) {
@@ -221,21 +176,71 @@ final class CommandHandler {
       Push(:final relicId, :final path) => _push(context.unit!, relicId, path),
       MoveHq(:final to, :final path) => _moveHq(context.section!, to, path),
       EnterBattle() => _enter(context.section!),
-      // Storage, purchases, transfers, offers and delegation.
-      _ => _rule(HostRule.notAvailableYet),
+      Store() => sections.store(context.unit!, recall: false),
+      Recall() => sections.store(context.unit!, recall: true),
+      Deploy() => sections.deploy(context.unit!),
+      BuyNode(:final stat, :final step) => sections.buyNode(
+        context.unit!,
+        stat,
+        step,
+      ),
+      BuyUnit(:final unitType) => sections.buyUnit(
+        context.section!,
+        unitType,
+        seq,
+      ),
+      BuyWeapon(:final weapon) => sections.buyWeapon(context.section!, weapon),
+      BuyGuildCamp() => sections.buyCamp(context.section!, seq),
+      TransferMoney(:final toSectionId, :final amount) => sections.transfer(
+        context.section!,
+        toSectionId,
+        amount,
+      ),
+      OfferExchange(:final ownerSectionId, :final released, :final wanted) =>
+        sections.offer(
+          context.section!,
+          ExchangeOffer(
+            captorSectionId: context.section!.id,
+            ownerSectionId: ownerSectionId,
+            released: released,
+            wanted: wanted,
+          ),
+          seq,
+        ),
+      OfferRansom(:final ownerSectionId, :final released, :final price) =>
+        sections.offer(
+          context.section!,
+          RansomOffer(
+            captorSectionId: context.section!.id,
+            ownerSectionId: ownerSectionId,
+            released: released,
+            price: price,
+          ),
+          seq,
+        ),
+      AcceptOffer(:final offerId) => sections.answer(
+        context.section!,
+        offerId,
+        refuse: false,
+      ),
+      RefuseOffer(:final offerId) => sections.answer(
+        context.section!,
+        offerId,
+        refuse: true,
+      ),
+      DelegateHq(:final accountId) => sections.delegate(
+        context.section!,
+        command.sender.accountId,
+        accountId,
+      ),
     };
   }
 
   // Helpers.
 
-  static OrderPlan _rule(Enum reason) => PlanRefused(RuleRefused(reason));
-
   static OrderPlan _refusedFor(Enum reason) => reason.name == 'costAboveApMax'
       ? const PlanRefused(ApRefused())
-      : _rule(reason);
-
-  OrderPlan _when(Duration at, List<BattleEvent> Function() apply) =>
-      at > _now ? PlanWaits(at) : PlanReady(apply);
+      : refused(reason);
 
   String _teamOf(UnitState unit) => _state.sections[unit.sectionId]!.team;
 
@@ -257,19 +262,19 @@ final class CommandHandler {
   // Movement (MAP-04, COMBAT-03, COMBAT-06; stack decision 8).
 
   OrderPlan _move(UnitState unit, Position to, List<Cell>? path) {
-    if (unit.location is Carried) return _rule(HostRule.carried);
-    if (!unit.weapon.canMoveAt(_now)) return _rule(HostRule.weaponLoaded);
+    if (unit.location is Carried) return refused(HostRule.carried);
+    if (!unit.weapon.canMoveAt(_now)) return refused(HostRule.weaponLoaded);
     if (!(unit.observation?.allowsMovingAt(_now) ?? true)) {
-      return _rule(HostRule.observing);
+      return refused(HostRule.observing);
     }
     final goal = world.cellAt(to);
-    if (goal == null) return _rule(HostRule.offMap);
+    if (goal == null) return refused(HostRule.offMap);
     // MAP-38: a camp's goal and path stay on the ground; a searched path
     // between two ground cells never leaves it.
-    if (unit.type.category == _encampment &&
+    if (unit.type.category == encampmentCategory &&
         (goal.surface != groundSurface ||
             (path?.any((cell) => cell.island != null) ?? false))) {
-      return _rule(HostRule.islandUnreachable);
+      return refused(HostRule.islandUnreachable);
     }
     final mover = Mover.unit(unit.type, flying: unit.flying);
     final route = _route(
@@ -279,7 +284,7 @@ final class CommandHandler {
       path,
     );
     if (route case PlanRefused()) return route as OrderPlan;
-    final (cells: _, :samples) = route as _Route;
+    final (cells: _, :samples, falls: _) = route as _Route;
     // The path search prices with the same movement cost: a path it gives
     // is passable.
     final movement = _cost.move(
@@ -319,40 +324,40 @@ final class CommandHandler {
   /// client's [path] checked cell by cell, or one searched; a refusal
   /// otherwise.
   Object _route(PathMover mover, CellRef from, CellRef goal, List<Cell>? path) {
-    final finder = Pathfinder(
-      map: battle.map.host.navigation,
-      cost: battle.map.cost,
-      rules: battle.map.rules,
-    );
+    final finder = battle.world.paths;
     final List<CellRef> route;
     final List<nav.PathSample> samples;
+    final List<CellRef> falls;
     if (path != null) {
       final cells = [for (final cell in path) world.cellOf(cell)];
-      if (cells.contains(null)) return _rule(HostRule.offMap);
+      if (cells.contains(null)) return refused(HostRule.offMap);
       if (cells.isEmpty || cells.first != from || cells.last != goal) {
-        return _rule(HostRule.pathNotFromMover);
+        return refused(HostRule.pathNotFromMover);
       }
       switch (finder.check(mover: mover, path: cells.cast<CellRef>())) {
         case PathFails(:final reason):
-          return _rule(reason);
-        case PathPasses(samples: final passed):
+          return refused(reason);
+        case PathPasses(samples: final passed, falls: final fell):
           route = cells.cast<CellRef>();
           samples = passed;
+          falls = fell;
       }
     } else {
       final onGround =
           from.surface == groundSurface &&
           goal.surface == groundSurface &&
-          !mover.modes.contains(battle.map.rules.flyingMode);
+          !mover.modes.contains(battle.world.rules.flyingMode);
       final found = onGround
-          ? battle.map.searchFor(mover).fast(from, goal)
+          ? battle.world.searchFor(mover).fast(from, goal)
           : finder.find(mover: mover, from: from, to: goal);
-      if (found == null) return _rule(HostRule.noPath);
+      if (found == null) return refused(HostRule.noPath);
       route = found.cells;
       samples = found.samples;
+      falls = found.falls;
     }
     return (
       cells: route,
+      falls: falls,
       samples: [
         for (final sample in samples)
           PathSample(
@@ -367,25 +372,29 @@ final class CommandHandler {
   OrderPlan _moveHq(SectionState section, Position to, List<Cell>? path) {
     final team = _state.teams[section.team]!;
     final goal = world.cellAt(to);
-    if (goal == null) return _rule(HostRule.offMap);
+    if (goal == null) return refused(HostRule.offMap);
     final hq = battle.settings.hq;
     final mover = Mover.hq(hq);
     final pathMover = PathMover(apPerM: mover.apPerM, modes: mover.modes);
     final route = _route(pathMover, team.hq.cell, goal, path);
     if (route case PlanRefused()) return route as OrderPlan;
-    final (:cells, :samples) = route as _Route;
-    // HQ-12: any unit standing on the path ends the order.
+    final (:cells, :samples, :falls) = route as _Route;
+    // HQ-12: any unit standing on the path ends the order; HQ-48: units
+    // where it lands after a fall are killed, not in its way.
+    final along = alongOf(pathMover, cells);
     double? blockedAtM;
     var stop = goal;
-    var along = 0.0;
+    var stopIndex = cells.length - 1;
     for (var i = 1; i < cells.length; i++) {
-      along += samples[i - 1].lengthM;
-      final standing = _state.units.values.any(
-        (unit) => unit.onField && unit.cell == cells[i],
-      );
+      final standing =
+          !falls.contains(cells[i]) &&
+          _state.units.values.any(
+            (unit) => unit.onField && unit.cell == cells[i],
+          );
       if (standing) {
-        blockedAtM = along - samples[i - 1].lengthM;
+        blockedAtM = along[i - 1];
         stop = cells[i - 1];
+        stopIndex = i - 1;
         break;
       }
     }
@@ -411,32 +420,41 @@ final class CommandHandler {
           ),
         ),
       );
+      final landed = [
+        for (final cell in falls)
+          if (cells.indexOf(cell) <= stopIndex)
+            for (final unit in _state.units.values.toList())
+              if (unit.onField && unit.cell == cell) unit.id,
+      ];
       return [
         MoveStarted(moverId: id, arrivesAt: moved.movement.arrivesAt),
         if (moved.endedByUnit) MoveStopped(moverId: id, at: _positionOf(stop)),
+        for (final unitId in landed) ...crush(unitId, by: id),
       ];
     });
   }
 
-  // The HQ manager (HQ-07, decision 220).
+  // The HQ manager (HQ-07, decisions 220, 227): a player who logs in is
+  // compared with the holder of the role by rank, not with a delegate.
 
   OrderPlan _enter(SectionState section) {
     final team = _state.teams[section.team]!;
-    final current = team.managerAccountId;
-    final managing = _state.sections.values
-        .where((other) => other.accountId == current)
+    final holder = team.holderAccountId;
+    final holding = _state.sections.values
+        .where((other) => other.accountId == holder)
         .firstOrNull;
     return PlanReady(() {
-      final manager = _teams.afterLogIn(
-        manager: managing == null ? null : _candidate(managing),
+      final ranked = _teams.afterLogIn(
+        holder: holding == null ? null : _candidate(holding),
         entering: _candidate(section),
         random: battle.random,
       );
-      if (manager.playerId == current) return const [];
+      if (ranked.playerId == holder) return const [];
       battle.change(
-        (state) => state.withTeam(team.withManager(manager.playerId)),
+        (state) => state.withTeam(team.withHolder(ranked.playerId)),
       );
-      return [ManagerChanged(team: team.id, accountId: manager.playerId)];
+      if (ranked.playerId == team.managerAccountId) return const [];
+      return [ManagerChanged(team: team.id, accountId: ranked.playerId)];
     });
   }
 
@@ -448,10 +466,26 @@ final class CommandHandler {
     commanderXp: _state.units.values
         .where(
           (unit) =>
-              unit.sectionId == section.id && unit.type.category == _commander,
+              unit.sectionId == section.id &&
+              unit.type.category == commanderCategory,
         )
         .fold(0, (xp, unit) => xp + unit.xp.earned),
   );
+
+  /// The distance along [cells], a path [mover] passes, at which it
+  /// reaches each of them: a step gives several samples, a fall none.
+  List<double> alongOf(PathMover mover, List<CellRef> cells) {
+    final finder = battle.world.paths;
+    final along = <double>[0];
+    for (var i = 1; i < cells.length; i++) {
+      final step = finder.check(mover: mover, path: [cells[i - 1], cells[i]]);
+      along.add(
+        along.last +
+            (step as PathPasses).samples.fold(0.0, (sum, s) => sum + s.lengthM),
+      );
+    }
+    return along;
+  }
 
   // Weapons (COMBAT-26 to COMBAT-33, COMBAT-56).
 
@@ -505,9 +539,9 @@ final class CommandHandler {
   OrderPlan _pickUp(UnitState unit, String droppedId, int seq) {
     final lying = _state.dropped[droppedId];
     if (lying == null || lying.dropped.isGoneAt(_now)) {
-      return _rule(HostRule.unknownDropped);
+      return refused(HostRule.unknownDropped);
     }
-    if (lying.cell != unit.cell) return _rule(HostRule.notOnTheSpot);
+    if (lying.cell != unit.cell) return refused(HostRule.notOnTheSpot);
     final result = _armory.pickUp(
       unit: unit.type,
       state: unit.weapon,
@@ -517,17 +551,15 @@ final class CommandHandler {
     );
     return switch (result) {
       WeaponRefused(:final reason) => _refusedFor(reason),
-      WeaponDone(:final at, :final state, :final pool, :final dropped) => _when(
-        at,
-        () {
+      WeaponDone(:final at, :final state, :final pool, :final dropped) =>
+        planAt(at, _now, () {
           _put(unit.copyWith(weapon: state, pool: pool));
           battle.change((s) => s.withoutDropped(droppedId));
           return [
             WeaponPickedUp(unitId: unit.id, droppedId: droppedId),
             if (dropped != null) _drop(dropped, unit.cell!, 'w-$seq-own'),
           ];
-        },
-      ),
+        }),
     };
   }
 
@@ -549,9 +581,9 @@ final class CommandHandler {
 
   OrderPlan _flight(UnitState unit, {required bool flying}) {
     final times = unit.type.flight;
-    if (times == null) return _rule(HostRule.cannotFly);
+    if (times == null) return refused(HostRule.cannotFly);
     if (unit.flying == flying) {
-      return _rule(flying ? HostRule.alreadyFlying : HostRule.notFlying);
+      return refused(flying ? HostRule.alreadyFlying : HostRule.notFlying);
     }
     final endsAt =
         _now +
@@ -584,19 +616,27 @@ final class CommandHandler {
   OrderPlan _embark(UnitState unit, String transportId) {
     final transport = _state.units[transportId];
     if (transport == null || !transport.onField) {
-      return _rule(HostRule.unknownTarget);
+      return refused(HostRule.unknownTarget);
     }
     if (_teamOf(transport) != _teamOf(unit)) {
-      return _rule(ActionRefusal.targetNotFriendly);
+      return refused(ActionRefusal.targetNotFriendly);
     }
     final capacity = transport.type.role.maxTotalWeight;
-    if (capacity == null) return _rule(HostRule.notATransport);
-    if (!unit.type.role.transportable) return _rule(HostRule.notTransportable);
-    if (transport.flying) return _rule(HostRule.transportFlying);
-    if (!_within(unit, transport.cell!, _reach)) return _rule(HostRule.tooFar);
+    if (capacity == null) return refused(HostRule.notATransport);
+    if (!unit.type.role.transportable) {
+      return refused(HostRule.notTransportable);
+    }
+    if (transport.flying) return refused(HostRule.transportFlying);
+    // HQ-49: a recalled transport takes no passengers.
+    if (!(transport.location as OnField).takesPassengers) {
+      return refused(HostRule.transportRecalled);
+    }
+    if (!_within(unit, transport.cell!, _reach)) {
+      return refused(HostRule.tooFar);
+    }
     final weight = unit.type.stats.weight;
     if (weight > (transport.type.role.maxUnitWeight ?? capacity)) {
-      return _rule(HostRule.tooHeavy);
+      return refused(HostRule.tooHeavy);
     }
     final carried = _state.units.values
         .where(
@@ -606,7 +646,7 @@ final class CommandHandler {
           },
         )
         .fold<double>(0, (sum, other) => sum + other.type.stats.weight);
-    if (carried + weight > capacity) return _rule(HostRule.transportFull);
+    if (carried + weight > capacity) return refused(HostRule.transportFull);
     return PlanReady(() {
       _put(
         unit.copyWith(location: Carried(transport.id), cell: transport.cell),
@@ -617,9 +657,9 @@ final class CommandHandler {
 
   OrderPlan _disembark(UnitState unit) {
     final location = unit.location;
-    if (location is! Carried) return _rule(HostRule.notCarried);
+    if (location is! Carried) return refused(HostRule.notCarried);
     final transport = _state.units[location.transportId]!;
-    if (transport.flying) return _rule(HostRule.transportFlying);
+    if (transport.flying) return refused(HostRule.transportFlying);
     return PlanReady(() {
       _put(unit.copyWith(location: const Deployed(), cell: transport.cell));
       return [Disembarked(unitId: unit.id, at: _positionOf(transport.cell!))];
@@ -630,9 +670,9 @@ final class CommandHandler {
 
   OrderPlan _build(UnitState unit, String structure, List<Cell> cells) {
     final refs = [for (final cell in cells) world.cellOf(cell)];
-    if (refs.isEmpty || refs.contains(null)) return _rule(HostRule.offMap);
+    if (refs.isEmpty || refs.contains(null)) return refused(HostRule.offMap);
     final where = refs.cast<CellRef>();
-    if (!_within(unit, where.first, _reach)) return _rule(HostRule.tooFar);
+    if (!_within(unit, where.first, _reach)) return refused(HostRule.tooFar);
     final result = _roleActions.startBuild(
       unit: unit.type,
       structure: structure,
@@ -642,7 +682,7 @@ final class CommandHandler {
     if (result case ActionRefused(:final reason)) return _refusedFor(reason);
     final TimedActionStarted(:at, :pool, :action) =
         result as TimedActionStarted;
-    return _when(at, () {
+    return planAt(at, _now, () {
       final site = '$structure@(${where.first.x}, ${where.first.y})';
       _startWork(
         unit,
@@ -679,10 +719,10 @@ final class CommandHandler {
 
   OrderPlan _repair(UnitState unit, String targetId) {
     final target = _targetOf(unit, targetId);
-    if (target == null) return _rule(HostRule.unknownTarget);
+    if (target == null) return refused(HostRule.unknownTarget);
     final repaired = _state.units[targetId];
     if (repaired != null && !_within(unit, repaired.cell!, _reach)) {
-      return _rule(HostRule.tooFar);
+      return refused(HostRule.tooFar);
     }
     final result = _roleActions.startRepair(
       unit: unit.type,
@@ -693,7 +733,7 @@ final class CommandHandler {
     if (result case ActionRefused(:final reason)) return _refusedFor(reason);
     final TimedActionStarted(:at, :pool, :action) =
         result as TimedActionStarted;
-    return _when(at, () {
+    return planAt(at, _now, () {
       _startWork(unit, pool, Work(workId: targetId, action: action));
       return [
         RepairStarted(
@@ -711,7 +751,7 @@ final class CommandHandler {
         .firstOrNull;
     final work = owner?.work;
     if (owner == null || work == null || work.action.startedAt != null) {
-      return _rule(HostRule.unknownWork);
+      return refused(HostRule.unknownWork);
     }
     final result = _roleActions.resume(
       action: work.action,
@@ -721,7 +761,7 @@ final class CommandHandler {
     if (result case ActionRefused(:final reason)) return _refusedFor(reason);
     final TimedActionStarted(:at, :pool, :action) =
         result as TimedActionStarted;
-    return _when(at, () {
+    return planAt(at, _now, () {
       if (owner.id != unit.id) _put(owner.copyWith(clearWork: true));
       _startWork(_state.units[unit.id]!, pool, work.withAction(action));
       return [
@@ -741,9 +781,7 @@ final class CommandHandler {
     _put(unit.copyWith(clearWork: true));
     final structure = work.structure;
     if (structure != null) {
-      battle.change(
-        (state) => state.withStructure(work.workId, structure, work.cells),
-      );
+      worlds.built(work.workId, structure, work.cells);
       return [
         StructureBuilt(
           siteId: work.workId,
@@ -769,9 +807,9 @@ final class CommandHandler {
   OrderPlan _heal(UnitState unit, String targetId) {
     final target = _targetOf(unit, targetId);
     final healed = _state.units[targetId];
-    if (target == null) return _rule(HostRule.unknownTarget);
+    if (target == null) return refused(HostRule.unknownTarget);
     if (healed != null && !_within(unit, healed.cell!, _reach)) {
-      return _rule(HostRule.tooFar);
+      return refused(HostRule.tooFar);
     }
     final result = _roleActions.heal(
       unit: unit.type,
@@ -782,7 +820,7 @@ final class CommandHandler {
     );
     if (result case ActionRefused(:final reason)) return _refusedFor(reason);
     final Healed(:at, :pool, :health) = result as Healed;
-    return _when(at, () {
+    return planAt(at, _now, () {
       _put(unit.copyWith(pool: pool));
       _put(_state.units[targetId]!.copyWith(health: health));
       return [
@@ -794,11 +832,11 @@ final class CommandHandler {
   OrderPlan _observe(UnitState unit) {
     final role = unit.type.role.observe;
     if (role == null || !unit.type.actions.contains(UnitAction.observe)) {
-      return _rule(ActionRefusal.notInActions);
+      return refused(ActionRefusal.notInActions);
     }
     final paid = unit.pool.payWhenReady(role.ap, _now);
     if (paid == null) return const PlanRefused(ApRefused());
-    return _when(paid.at, () {
+    return planAt(paid.at, _now, () {
       final observation = Observation(role: role, startedAt: paid.at);
       _put(unit.copyWith(pool: paid.pool, observation: observation));
       return [ObservationStarted(unitId: unit.id, endsAt: observation.endsAt)];
@@ -809,9 +847,9 @@ final class CommandHandler {
 
   OrderPlan _captureOrder(UnitState unit, String relicId) {
     final relic = _state.relics[relicId];
-    if (relic == null) return _rule(HostRule.unknownRelic);
+    if (relic == null) return refused(HostRule.unknownRelic);
     final team = _teamOf(unit);
-    if (relic.owner == team) return _rule(HostRule.alreadyOwned);
+    if (relic.owner == team) return refused(HostRule.alreadyOwned);
     final radius = battle.settings.capture.radiusM;
     final occupants = [
       for (final other in _state.units.values)
@@ -841,7 +879,7 @@ final class CommandHandler {
     if (result case ActionRefused(:final reason)) return _refusedFor(reason);
     final CaptureContributed(:at, :pool, pot: filled) =
         result as CaptureContributed;
-    return _when(at, () {
+    return planAt(at, _now, () {
       _put(unit.copyWith(pool: pool));
       battle.change(
         (state) => state.withRelic(relic.withPots(capturePot: filled)),
@@ -859,14 +897,14 @@ final class CommandHandler {
 
   OrderPlan _push(UnitState unit, String relicId, List<Cell>? path) {
     final relic = _state.relics[relicId];
-    if (relic == null) return _rule(HostRule.unknownRelic);
+    if (relic == null) return refused(HostRule.unknownRelic);
     if (!_within(unit, relic.cell, battle.settings.capture.radiusM)) {
-      return _rule(ActionRefusal.outsideRadius);
+      return refused(ActionRefusal.outsideRadius);
     }
     final cells = path == null
         ? null
         : [for (final cell in path) world.cellOf(cell)];
-    if (cells != null && cells.contains(null)) return _rule(HostRule.offMap);
+    if (cells != null && cells.contains(null)) return refused(HostRule.offMap);
     final pot = relic.pushPot ?? PushPot(owner: relic.owner ?? '');
     final result = _pushing.contribute(
       unit: unit.type,
@@ -877,7 +915,7 @@ final class CommandHandler {
     );
     if (result case ActionRefused(:final reason)) return _refusedFor(reason);
     final PushContributed(:at, :pool, pot: filled) = result as PushContributed;
-    return _when(at, () {
+    return planAt(at, _now, () {
       _put(unit.copyWith(pool: pool));
       // Decision 219: the first push while the pot is empty sets the
       // path.
@@ -894,16 +932,19 @@ final class CommandHandler {
 
   // Shots (COMBAT-11 to COMBAT-25, COMBAT-36 to COMBAT-41, COMBAT-55).
 
-  OrderPlan _fire(UnitState unit, String targetId, int seq) {
+  /// The aim of [unit] at [targetId], or why it cannot fire at it: no
+  /// weapon, no such target, a flying target its weapon cannot reach, out of
+  /// range or not seen (COMBAT-11 to COMBAT-13).
+  (_Aim?, Enum?) _aim(UnitState unit, String targetId) {
     final weapon = unit.weapon.weapon;
-    if (weapon == null) return _rule(WeaponRefusal.noWeapon);
+    if (weapon == null) return (null, WeaponRefusal.noWeapon);
     final (cell, flying, armor, defense) = switch (_targetCell(targetId)) {
       final found? => found,
       null => (null, false, '', 0.0),
     };
-    if (cell == null) return _rule(HostRule.unknownTarget);
+    if (cell == null) return (null, HostRule.unknownTarget);
     if (flying && weapon.airborneFactor == 0) {
-      return _rule(HostRule.cannotHitFlying);
+      return (null, HostRule.cannotHitFlying);
     }
     final line = world.sightLine(
       unit.cell!,
@@ -911,7 +952,7 @@ final class CommandHandler {
       fromFlying: unit.flying,
       toFlying: flying,
     );
-    if (line.distanceM > weapon.rangeM) return _rule(HostRule.outOfRange);
+    if (line.distanceM > weapon.rangeM) return (null, HostRule.outOfRange);
     if (!_vision.canFireAt(
       unit: unit.type,
       weapon: weapon,
@@ -920,8 +961,24 @@ final class CommandHandler {
       time: _now,
       observation: unit.observation,
     )) {
-      return _rule(HostRule.targetNotSeen);
+      return (null, HostRule.targetNotSeen);
     }
+    return (
+      (weapon: weapon, cell: cell, armor: armor, defense: defense, line: line),
+      null,
+    );
+  }
+
+  /// The distance of a shot of [unit] at [targetId], or null when a `Fire`
+  /// order of [unit] at it would be refused for its aim: whether [unit]
+  /// sees it within its weapon's range (AI-07).
+  double? shotDistance(UnitState unit, String targetId) =>
+      _aim(unit, targetId).$1?.line.distanceM;
+
+  OrderPlan _fire(UnitState unit, String targetId, int seq) {
+    final (aim, refusal) = _aim(unit, targetId);
+    if (aim == null) return refused(refusal!);
+    final (:weapon, :cell, :armor, :defense, :line) = aim;
     return _shoot(unit, (shooter) {
       final roll = HitChance.roll(
         _hitChance.of(
@@ -947,7 +1004,9 @@ final class CommandHandler {
   (CellRef, bool, String, double)? _targetCell(String targetId) {
     if (targetId.startsWith('hq-')) {
       final team = _state.teams[targetId.substring(3)];
-      return team == null ? null : (team.hq.cell, false, 'hq', 0.0);
+      return team == null || team.eliminated
+          ? null
+          : (team.hq.cell, false, 'hq', 0.0);
     }
     final target = _state.units[targetId];
     if (target == null || !target.onField) return null;
@@ -997,12 +1056,12 @@ final class CommandHandler {
     final result = _armory.fire(state: unit.weapon, pool: unit.pool, now: _now);
     return switch (result) {
       WeaponRefused(:final reason) => _refusedFor(reason),
-      WeaponDone(:final at, :final state, :final pool) => _when(at, () {
+      WeaponDone(:final at, :final state, :final pool) => planAt(at, _now, () {
         final shooter = unit.copyWith(weapon: state, pool: pool);
         _put(shooter);
         final (hit, impacts) = resolve(shooter);
-        final drops = [..._pendingDrops];
-        _pendingDrops.clear();
+        final also = [..._pending];
+        _pending.clear();
         return [
           Attacked(
             attackerId: unit.id,
@@ -1011,13 +1070,15 @@ final class CommandHandler {
             hit: hit,
             impacts: impacts,
           ),
-          ...drops,
+          ...also,
         ];
       }),
     };
   }
 
-  final _pendingDrops = <WeaponDropped>[];
+  /// What a shot did beside its impacts: weapons dropped, a commander's
+  /// section stored.
+  final _pending = <BattleEvent>[];
 
   /// Deals [amount] to [targetId] for [shooter] and resolves its 0 HP
   /// (COMBAT-36 to COMBAT-43); carried units take their share
@@ -1072,6 +1133,33 @@ final class CommandHandler {
     return impacts;
   }
 
+  /// [unit] dies now: it drops its weapon as [dropId] (COMBAT-29); a
+  /// commander resurrects in storage with his section (UNIT-28, UNIT-29).
+  List<BattleEvent> _dies(UnitState unit, String dropId) {
+    final dropped = _armory.drop(unit.weapon, _now);
+    final events = <BattleEvent>[
+      if (dropped != null) _drop(dropped, unit.cell!, dropId),
+    ];
+    if (unit.type.permadeath) {
+      battle.change((state) => state.withoutUnit(unit.id));
+    } else {
+      events.addAll(sections.commanderDied(unit));
+    }
+    return events;
+  }
+
+  /// The unit [unitId] crushed now by the relic or HQ [by], whatever its
+  /// team: it dies (RELIC-25, decision 138). A unit that left the field
+  /// since is spared.
+  List<BattleEvent> crush(String unitId, {required String by}) {
+    final unit = _state.units[unitId];
+    if (unit == null || !unit.onField) return const [];
+    return [
+      Crushed(unitId: unit.id, unitType: unit.type.id, byId: by),
+      ..._dies(unit, 'w-$by-${unit.id}-${_now.inSeconds}'),
+    ];
+  }
+
   Impact _hurt(UnitState shooter, UnitState target, double amount, int seq) {
     final health = target.health.damaged(amount);
     final friendly = _teamOf(target) == _teamOf(shooter);
@@ -1079,49 +1167,21 @@ final class CommandHandler {
     if (!health.isZero) {
       _put(target.copyWith(health: health));
     } else {
-      final section = _state.sections[shooter.sectionId]!;
-      final level = _levels.levelFor(section.xp);
-      final own = _state.units.values.where(
-        (unit) => unit.sectionId == section.id,
-      );
       final outcome = _zeroHp.resolve(
         attacker: shooter.type,
         target: target.type,
         targetIsEnemy: !friendly,
         moraleValue: target.morale,
         ap: target.pool.apAt(_now),
-        attackerSectionHasRoom: _levels.hasRoom(
-          level: level,
-          active: own.where((unit) => unit.onField).length,
-          owned: own.length,
+        attackerSectionHasRoom: sections.hasRoom(
+          _state.sections[shooter.sectionId]!,
         ),
         random: battle.random,
       );
       switch (outcome) {
         case ZeroHpOutcome.death:
           result = ImpactResult.killed;
-          final dropped = _armory.drop(target.weapon, _now);
-          if (dropped != null) {
-            _pendingDrops.add(
-              _drop(dropped, target.cell!, 'w-$seq-${target.id}'),
-            );
-          }
-          // Commanders resurrect in storage (UNIT-28); the rest of a
-          // commander's death is applied with storage (M5.12).
-          if (target.type.permadeath) {
-            battle.change((state) => state.withoutUnit(target.id));
-          } else {
-            _put(
-              target.copyWith(
-                location: const Stored(),
-                health: Health.full(target.health.max),
-                weapon: const WeaponState.unarmed(),
-                clearCell: true,
-                clearMove: true,
-                clearWork: true,
-              ),
-            );
-          }
+          _pending.addAll(_dies(target, 'w-$seq-${target.id}'));
         case ZeroHpOutcome.defection:
           result = ImpactResult.defected;
           _put(target.copyWith(sectionId: shooter.sectionId, health: health));
@@ -1149,13 +1209,13 @@ final class CommandHandler {
 
   OrderPlan _fireAt(UnitState unit, Position target, int seq) {
     final weapon = unit.weapon.weapon;
-    if (weapon == null) return _rule(WeaponRefusal.noWeapon);
+    if (weapon == null) return refused(WeaponRefusal.noWeapon);
     final splash = weapon.splashRadiusM;
     if (!weapon.indirectFire && splash == null) {
-      return _rule(HostRule.notIndirect);
+      return refused(HostRule.notIndirect);
     }
     final aimed = world.cellAt(target);
-    if (aimed == null) return _rule(HostRule.offMap);
+    if (aimed == null) return refused(HostRule.offMap);
     final distance = world.distanceM(unit.cell!, aimed);
     final section = unit.sectionId;
     bool sees(UnitState observer) => _vision.unitSees(
@@ -1181,7 +1241,7 @@ final class CommandHandler {
                     _within(radio, scout.cell!, radio.type.role.relayRange!),
               ),
         );
-    if (distance > weapon.rangeM) return _rule(HostRule.outOfRange);
+    if (distance > weapon.rangeM) return refused(HostRule.outOfRange);
     // Artillery fires at what its section sees or a scout reports
     // (COMBAT-12); the explosive charge goes off on a point its engineer
     // sees itself, within its range (decision 152).
@@ -1193,7 +1253,7 @@ final class CommandHandler {
             relayedByRadio: relayed,
           )
         : sees(unit);
-    if (!targetable) return _rule(HostRule.positionNotSeen);
+    if (!targetable) return refused(HostRule.positionNotSeen);
     return _shoot(unit, (shooter) {
       final there = onField
           .where((u) => u.cell == aimed && _teamOf(u) != _teamOf(shooter))
@@ -1237,14 +1297,15 @@ final class CommandHandler {
           impacts.add(_hurt(shooter, _state.units[victim.id]!, amount, seq));
         }
       }
+      _pending.addAll(worlds.bombard(weapon, landed));
       return (roll.hits, impacts);
     });
   }
 
   OrderPlan _fireAimed(UnitState unit, Direction aim, int seq) {
     final weapon = unit.weapon.weapon;
-    if (weapon == null) return _rule(WeaponRefusal.noWeapon);
-    if (weapon.projectileSpeedMps == null) return _rule(HostRule.notAimed);
+    if (weapon == null) return refused(WeaponRefusal.noWeapon);
+    if (weapon.projectileSpeedMps == null) return refused(HostRule.notAimed);
     return _shoot(unit, (shooter) {
       // The shot leaves from the middle of the shooter's hit volume, which
       // the rules core then skips as the shooter's own.
@@ -1264,11 +1325,12 @@ final class CommandHandler {
               hitBox: other.type.hitBox,
             ),
         for (final team in _state.teams.values)
-          ShotTarget(
-            id: hqId(team.id),
-            position: world.pointOf(team.hq.cell),
-            hitBox: battle.settings.hq.hitBox,
-          ),
+          if (!team.eliminated)
+            ShotTarget(
+              id: hqId(team.id),
+              position: world.pointOf(team.hq.cell),
+              hitBox: battle.settings.hq.hitBox,
+            ),
       ];
       final outcome = _firstPerson.fire(
         weapon: weapon,
@@ -1286,7 +1348,11 @@ final class CommandHandler {
           true,
           _hit(shooter, targetId, _damageTo(weapon, targetId, shooter), seq),
         ),
-        ShotHitsObstacle() || ShotMisses() => (false, const <Impact>[]),
+        ShotHitsObstacle(:final point) => () {
+          _pending.addAll(worlds.obstacleHit(weapon, point));
+          return (false, const <Impact>[]);
+        }(),
+        ShotMisses() => (false, const <Impact>[]),
       };
     });
   }

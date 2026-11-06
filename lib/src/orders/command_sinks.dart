@@ -1,9 +1,9 @@
 import 'package:battle_host/src/core/battle.dart';
+import 'package:battle_host/src/core/journal.dart';
 import 'package:battle_host/src/orders/command_handler.dart';
 import 'package:battle_host/src/orders/rate_limit.dart';
 import 'package:battle_host/src/orders/refusal.dart';
 import 'package:battle_host/src/ports/clock.dart';
-import 'package:battle_host/src/ports/log_sink.dart';
 import 'package:battle_protocol/battle_protocol.dart';
 
 /// Where commands go (a port, stack decision 7): one entry for every
@@ -18,27 +18,29 @@ abstract interface class CommandSink {
 /// The commands of one battle (Facade): its handler, with origin tagging
 /// and logging around it (Decorator, decisions 162 and 166): each command
 /// gets the origin of its sign-in and the battle's next sequence number,
-/// then goes to the log with its events. The battle's own events go to
-/// the log as they happen.
+/// then goes to the [journal] with its events. The battle's own events go
+/// there as they happen.
+///
+/// A command is acknowledged ([submit] returns) only once its entry is in
+/// the write-ahead log, synced to disk (stack decision 2).
 /// {@endtemplate}
 final class BattleCommands implements CommandSink {
   /// {@macro battle_commands}
-  new({required this.battle, required this.log}) {
-    battle.onEvents = (at, events) =>
-        log.append(battle.id, LogEntry(at: at, events: events));
+  new({required this.battle, required this.journal}) {
+    battle.onEntry = (entry) => journal.append(battle.id, entry);
   }
 
   /// The battle.
   final Battle battle;
 
   /// Its log.
-  final LogSink log;
+  final Journal journal;
 
   @override
   HandledOrder submit(Command command, {required Origin origin}) {
     final stamped = command.stamped(origin: origin, seq: battle.takeSeq());
     final handled = battle.orders.handle(stamped);
-    log.append(
+    journal.append(
       battle.id,
       LogEntry(at: battle.time, command: stamped, events: handled.events),
     );

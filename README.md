@@ -15,8 +15,20 @@ the plan).
   is skipped. Timers run from seconds to days.
 - **A core without I/O**: it takes a `Clock`, the seeded random of
   [battle_rules](https://github.com/hawkbee1/battle_rules) and ports (`MapSource`,
-  `ErrorReporter`). Adapters in `lib/src/adapters/` read the plan and the maps from disk
-  and report errors to Sentry.
+  `ErrorReporter`, `WriteAheadLog`, `LogSink`, `SnapshotStore`). Adapters in
+  `lib/src/adapters/` read the plan and the maps from disk, report errors to Sentry, write
+  the write-ahead log to disk and keep logs and snapshots in Appwrite Storage.
+- **Nothing acknowledged is lost** (stack decision 2): an order is acknowledged once its
+  log entry is synced to the write-ahead log; every 10 seconds the new entries go up as
+  one compressed batch, and every 5 minutes a snapshot. A stopped battle is recovered from
+  its latest snapshot and the log after it, replayed and checked entry by entry.
+- **Server-managed sections** look like any other (AI-06). Each of their units has a fire
+  check every 30 minutes (AI-07); its `Fire` orders, like every order the server gives its
+  sections, go through the command handler with the origin `server` and are logged.
+
+The Appwrite adapters use the buckets `battle_logs` and `battle_snapshots` of hawkbee's
+`backend/appwrite.config.json`. Their contract tests on the local Appwrite are opt-in: tag
+`appwrite`, with `APPWRITE_API_KEY` set (`dart_test.yaml`).
 
 ```sh
 dart run battle_host run --plan <apps/battle_team/plan> --maps <built maps> --map <id> \

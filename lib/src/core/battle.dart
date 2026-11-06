@@ -1,5 +1,6 @@
 import 'package:battle_host/src/core/battle_setup.dart';
 import 'package:battle_host/src/core/battle_state.dart';
+import 'package:battle_host/src/core/battle_world.dart';
 import 'package:battle_host/src/core/shared_map.dart';
 import 'package:battle_host/src/core/timer_queue.dart';
 import 'package:battle_host/src/orders/command_handler.dart';
@@ -46,6 +47,50 @@ final class WorkEnds extends BattleTimer {
   final String unitId;
 }
 
+/// {@template recall_ends}
+/// The recall of [unitId] ends: it is stored, unless it left the field
+/// since (HQ-32).
+/// {@endtemplate}
+final class RecallEnds extends BattleTimer {
+  /// {@macro recall_ends}
+  const new(this.unitId);
+
+  /// The unit.
+  final String unitId;
+}
+
+/// {@template capture_ends}
+/// The 30-minute capture of [relicId] ends, unless it was lost since
+/// (RELIC-05, RELIC-08).
+/// {@endtemplate}
+final class CaptureEnds extends BattleTimer {
+  /// {@macro capture_ends}
+  const new(this.relicId);
+
+  /// The relic.
+  final String relicId;
+}
+
+/// {@template relic_arrives}
+/// The push of [relicId] reaches where it stops (RELIC-24).
+/// {@endtemplate}
+final class RelicArrives extends BattleTimer {
+  /// {@macro relic_arrives}
+  const new(this.relicId);
+
+  /// The relic.
+  final String relicId;
+}
+
+/// {@template hold_ends}
+/// A team's relic hold reaches its end: it wins unless it was reset
+/// (RELIC-14).
+/// {@endtemplate}
+final class HoldEnds extends BattleTimer {
+  /// {@macro hold_ends}
+  const new();
+}
+
 /// {@template flight_ends}
 /// The landing or take-off of [unitId] ends: it [flying] or not.
 /// {@endtemplate}
@@ -58,6 +103,73 @@ final class FlightEnds extends BattleTimer {
 
   /// Whether it flies once done.
   final bool flying;
+}
+
+/// {@template server_check}
+/// The fire check of [unitId], a unit of a server-managed section, is due
+/// (AI-07).
+/// {@endtemplate}
+final class ServerCheck extends BattleTimer {
+  /// {@macro server_check}
+  const new(this.unitId);
+
+  /// The unit.
+  final String unitId;
+}
+
+/// {@template battle_memento}
+/// What a snapshot keeps of a battle (Memento, stack decision 7): enough to
+/// restore it on its map with the shared definitions. Only `Battle` makes
+/// one and reads one back; the host stores it encoded.
+/// {@endtemplate}
+final class BattleMemento {
+  /// {@macro battle_memento}
+  const new({
+    required this.battleId,
+    required this.mapId,
+    required this.settings,
+    required this.seed,
+    required this.randomState,
+    required this.minStartingMoney,
+    required this.state,
+    required this.time,
+    required this.nextSeq,
+    required this.timers,
+    required this.timersFired,
+  });
+
+  /// The battle.
+  final String battleId;
+
+  /// Its map.
+  final String mapId;
+
+  /// Its own settings (decision 172).
+  final BattleSettings settings;
+
+  /// The seed of its random.
+  final int seed;
+
+  /// The state of its random.
+  final List<int> randomState;
+
+  /// The money floor of its war's sections.
+  final int minStartingMoney;
+
+  /// Its state.
+  final BattleState state;
+
+  /// Its battle time.
+  final Duration time;
+
+  /// The sequence number of its next accepted command.
+  final int nextSeq;
+
+  /// Its timers, in the order they fire.
+  final List<(Duration, BattleTimer)> timers;
+
+  /// The timers it fired.
+  final int timersFired;
 }
 
 /// {@template battle}
@@ -122,6 +234,9 @@ final class Battle {
           money: section.money,
           xp: section.xp,
           medals: section.medals,
+          guildId: section.guildId,
+          guildChief: section.guildChief,
+          serverManaged: section.serverManaged,
         );
         for (final unit in section.units) {
           _unique(units, unit.id, 'unit');
@@ -156,13 +271,21 @@ final class Battle {
         }
       }
     }
-    return Battle._(
+    final battle = Battle._(
       id: setup.battleId,
       map: map,
       definitions: definitions,
       settings: settings,
       random: XorshiftRandom(setup.seed),
+      minStartingMoney:
+          setup.minStartingMoney ?? definitions.economy.minStartingMoney,
       state: BattleState(
+        victory: VictoryRules(settings.victory).start(
+          relics: [
+            for (var i = 1; i <= map.host.relicStarts.length; i++) 'relic-$i',
+          ],
+          teams: teams.keys,
+        ),
         weather: settings.weather.states.first,
         units: Map.unmodifiable(units),
         sections: Map.unmodifiable(sections),
@@ -176,6 +299,54 @@ final class Battle {
         }),
       ),
     );
+    // AI-07: each unit of a server-managed section has its fire check.
+    final check = ServerFireCheck(settings.serverManaged)
+        .nextAfter(Duration.zero);
+    for (final unit in units.values) {
+      if (sections[unit.sectionId]!.serverManaged) {
+        battle.schedule(check, ServerCheck(unit.id));
+      }
+    }
+    return battle;
+  }
+
+  /// The battle [memento] holds, on [map], the map it names, with the
+  /// shared [definitions]: its world rebuilt from its delta layer, its
+  /// timers, its random and its sequence numbers where they were (Memento,
+  /// stack decisions 2 and 7). It goes on as the battle that was saved
+  /// would have.
+  ///
+  /// Throws an [ArgumentError] for a map that is not the one it names, and
+  /// a [GameDataException] for settings the definitions refuse.
+  factory restore(
+    BattleMemento memento, {
+    required SharedMap map,
+    required GameData definitions,
+  }) {
+    if (map.id != memento.mapId) {
+      throw ArgumentError.value(map.id, 'map', 'is not ${memento.mapId}');
+    }
+    final battle =
+        Battle._(
+            id: memento.battleId,
+            map: map,
+            definitions: definitions,
+            settings: definitions.checkSettings(memento.settings),
+            random: XorshiftRandom.resume(
+              seed: memento.seed,
+              state: memento.randomState,
+            ),
+            minStartingMoney: memento.minStartingMoney,
+            state: memento.state,
+          )
+          .._time = memento.time
+          .._nextSeq = memento.nextSeq
+          .._fired = memento.timersFired
+          .._world = BattleWorld.load(map, memento.state.delta);
+    for (final (at, timer) in memento.timers) {
+      battle._timers.schedule(at, timer);
+    }
+    return battle;
   }
 
   new _({
@@ -184,6 +355,7 @@ final class Battle {
     required this.definitions,
     required this.settings,
     required this.random,
+    required this.minStartingMoney,
     required this._state,
   });
 
@@ -206,19 +378,27 @@ final class Battle {
   final BattleSettings settings;
 
   /// Its seeded random (stack decision 1).
-  final SeededRandom random;
+  final XorshiftRandom random;
+
+  /// The money floor of its war's sections (SOC-10, ECO-13).
+  final int minStartingMoney;
 
   BattleState _state;
   Duration _time = Duration.zero;
   var _nextSeq = 1;
 
+  BattleWorld? _world;
+
+  /// Its own world: the shared map until it first changes (M5.14).
+  BattleWorld get world => _world ??= BattleWorld(map);
+
   /// The command handler of this battle (Facade for every sender).
   late final CommandHandler orders = CommandHandler(this);
 
-  /// Hears the events the battle makes on its own, at their time (a
-  /// waiting order carried out, a work done): the host logs them
-  /// (Observer, stack decision 7).
-  void Function(Duration at, List<BattleEvent> events)? onEvents;
+  /// Hears the entries the battle makes on its own, at their time (a
+  /// waiting order carried out, a work done, an order of a server-managed
+  /// unit's fire check): the host logs them (Observer, stack decision 7).
+  void Function(LogEntry entry)? onEntry;
 
   /// The next sequence number of an accepted command (stack decision 8).
   int takeSeq() => _nextSeq++;
@@ -255,6 +435,22 @@ final class Battle {
     _timers.schedule(at, timer);
   }
 
+  /// What a snapshot keeps of this battle now (Memento, stack decision 2):
+  /// [Battle.restore] gives it back.
+  BattleMemento save() => BattleMemento(
+    battleId: id,
+    mapId: map.id,
+    settings: settings,
+    seed: random.seed,
+    randomState: random.state,
+    minStartingMoney: minStartingMoney,
+    state: _state,
+    time: _time,
+    nextSeq: _nextSeq,
+    timers: _timers.pending,
+    timersFired: _fired,
+  );
+
   /// Brings the battle to the battle time [to], firing the timers due on
   /// the way in their order.
   ///
@@ -272,22 +468,43 @@ final class Battle {
   }
 
   void _fire(BattleTimer timer) {
-    final events = switch (timer) {
+    final before = _state;
+    final (command, events) = switch (timer) {
       SectionUnlocks(:final sectionId) => () {
         _state = _state.withSection(
           (_state.sections[sectionId] ??
                   (throw StateError('no section $sectionId to unlock')))
               .lockedTo(null),
         );
-        return const <BattleEvent>[];
+        return (null, const <BattleEvent>[]);
       }(),
-      RunOrder(:final command) => orders.handle(command).events,
-      WorkEnds(:final unitId) => orders.finishWork(unitId),
-      FlightEnds(:final unitId, :final flying) => orders.finishFlight(
-        unitId,
-        flying: flying,
+      // A waiting order hears its own consequences in the handler.
+      RunOrder(:final command) => (null, orders.handle(command).events),
+      WorkEnds(:final unitId) => (
+        null,
+        orders.react(before, orders.finishWork(unitId)),
       ),
+      RecallEnds(:final unitId) => (
+        null,
+        orders.react(before, orders.sections.finishRecall(unitId)),
+      ),
+      CaptureEnds(:final relicId) => (
+        null,
+        orders.react(before, orders.relics.finishCapture(relicId)),
+      ),
+      RelicArrives(:final relicId) => (
+        null,
+        orders.react(before, orders.relics.finishPush(relicId)),
+      ),
+      HoldEnds() => (null, orders.react(before, orders.relics.holdDue())),
+      FlightEnds(:final unitId, :final flying) => (
+        null,
+        orders.finishFlight(unitId, flying: flying),
+      ),
+      ServerCheck(:final unitId) => orders.servers.check(unitId),
     };
-    if (events.isNotEmpty) onEvents?.call(_time, events);
+    if (command != null || events.isNotEmpty) {
+      onEntry?.call(LogEntry(at: _time, command: command, events: events));
+    }
   }
 }
