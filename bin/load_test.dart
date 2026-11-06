@@ -56,9 +56,13 @@ Future<void> main(List<String> args) async {
     terrain: plan.terrain,
   );
   final mapWatch = Stopwatch()..start();
-  maps.load(mapId);
+  final map = maps.load(mapId);
   mapWatch.stop();
   final rssMap = _rssMb();
+  final prepareWatch = Stopwatch()..start();
+  prepare(map, plan);
+  prepareWatch.stop();
+  final rssPrepared = _rssMb();
 
   final clock = ManualClock(DateTime.utc(2026, 11, 6));
   final logs = MemoryLogSink();
@@ -135,6 +139,8 @@ Future<void> main(List<String> args) async {
   _print(
     'bench=host_memory rss_start_mb=$rssStart rss_map_mb=$rssMap '
     'map_load_ms=${mapWatch.elapsedMilliseconds} '
+    'rss_prepared_mb=$rssPrepared '
+    'prepare_ms=${prepareWatch.elapsedMilliseconds} '
     'rss_after_each_battle_mb=${rssBattles.join(',')} rss_end_mb=$rssEnd',
   );
 
