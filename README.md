@@ -26,7 +26,7 @@ the plan).
   check every 30 minutes (AI-07); its `Fire` orders, like every order the server gives its
   sections, go through the command handler with the origin `server` and are logged.
 
-The Appwrite adapters use the buckets `battle_logs` and `battle_snapshots` of hawkbee's
+The Appwrite adapters use the buckets `bt_battle_logs` and `bt_battle_snapshots` of hawkbee's
 `backend/appwrite.config.json`. Their contract tests on the local Appwrite are opt-in: tag
 `appwrite`, with `APPWRITE_API_KEY` set (`dart_test.yaml`).
 

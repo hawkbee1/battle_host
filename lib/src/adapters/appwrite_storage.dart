@@ -6,13 +6,7 @@ import 'package:battle_host/src/ports/log_sink.dart';
 import 'package:battle_host/src/ports/snapshot_store.dart';
 import 'package:battle_protocol/battle_protocol.dart';
 import 'package:dart_appwrite/dart_appwrite.dart';
-
-/// The Appwrite Storage bucket of the battle logs
-/// (`backend/appwrite.config.json`).
-const battleLogsBucket = 'battle_logs';
-
-/// The Appwrite Storage bucket of the battle snapshots.
-const battleSnapshotsBucket = 'battle_snapshots';
+import 'package:hawkbee_schema/hawkbee_schema.dart';
 
 /// The longest battle ID the Appwrite adapters store: a file ID holds at
 /// most 36 characters, and a batch's adds 13 to the battle's.
@@ -44,7 +38,7 @@ List<LogEntry> decodeBatch(Uint8List data) =>
 /// {@endtemplate}
 final class AppwriteLogSink implements LogSink {
   /// {@macro appwrite_log_sink}
-  new(this.storage, {this.bucketId = battleLogsBucket});
+  new(this.storage, {this.bucketId = AppwriteIds.battleLogsBucketId});
 
   /// The Storage service of a server client.
   final Storage storage;
@@ -105,7 +99,7 @@ final class AppwriteLogSink implements LogSink {
 /// {@endtemplate}
 final class AppwriteSnapshotStore implements SnapshotStore {
   /// {@macro appwrite_snapshot_store}
-  new(this.storage, {this.bucketId = battleSnapshotsBucket});
+  new(this.storage, {this.bucketId = AppwriteIds.battleSnapshotsBucketId});
 
   /// The Storage service of a server client.
   final Storage storage;
