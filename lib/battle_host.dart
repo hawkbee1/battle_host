@@ -43,3 +43,6 @@ export 'src/ports/log_sink.dart';
 export 'src/ports/map_source.dart';
 export 'src/ports/snapshot_store.dart';
 export 'src/ports/write_ahead_log.dart';
+export 'src/stream/pending_alerts.dart';
+export 'src/stream/section_views.dart';
+export 'src/stream/update_stream.dart';

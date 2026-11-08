@@ -4,6 +4,7 @@ import 'package:battle_host/src/core/battle_world.dart';
 import 'package:battle_host/src/core/shared_map.dart';
 import 'package:battle_host/src/core/timer_queue.dart';
 import 'package:battle_host/src/orders/command_handler.dart';
+import 'package:battle_host/src/stream/pending_alerts.dart';
 import 'package:battle_protocol/battle_protocol.dart';
 import 'package:battle_rules/battle_rules.dart';
 
@@ -136,6 +137,7 @@ final class BattleMemento {
     required this.nextSeq,
     required this.timers,
     required this.timersFired,
+    this.alerts = const {},
   });
 
   /// The battle.
@@ -170,6 +172,10 @@ final class BattleMemento {
 
   /// The timers it fired.
   final int timersFired;
+
+  /// The relic alerts its players have not received yet, by account
+  /// (decision 233).
+  final Map<String, List<RelicAlert>> alerts;
 }
 
 /// {@template battle}
@@ -344,6 +350,7 @@ final class Battle {
             ),
             minStartingMoney: memento.minStartingMoney,
             state: memento.state,
+            alerts: PendingAlerts(memento.alerts),
           )
           .._time = memento.time
           .._nextSeq = memento.nextSeq
@@ -363,7 +370,8 @@ final class Battle {
     required this.random,
     required this.minStartingMoney,
     required this._state,
-  });
+    PendingAlerts? alerts,
+  }) : alerts = alerts ?? PendingAlerts();
 
   static void _unique(Map<String, Object> seen, String id, String what) {
     if (seen.containsKey(id)) {
@@ -388,6 +396,9 @@ final class Battle {
 
   /// The money floor of its war's sections (SOC-10, ECO-13).
   final int minStartingMoney;
+
+  /// The relic alerts its players have not received yet (decision 233).
+  final PendingAlerts alerts;
 
   BattleState _state;
   Duration _time = Duration.zero;
@@ -455,6 +466,7 @@ final class Battle {
     nextSeq: _nextSeq,
     timers: _timers.pending,
     timersFired: _fired,
+    alerts: alerts.pending,
   );
 
   /// Brings the battle to the battle time [to], firing the timers due on
