@@ -104,7 +104,8 @@ void main() {
     final battleClient = client.BattleClient(
       battleId: 'b-1',
       transport: transport,
-      address: () async => Uri.parse('ws://127.0.0.1:${server.port}/v1/socket'),
+      address: (_) async =>
+          Uri.parse('ws://127.0.0.1:${server.port}/v1/socket'),
       credential: () async => credential,
       clock: _Clock(f.clock),
       random: Random(5),

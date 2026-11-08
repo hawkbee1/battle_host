@@ -76,6 +76,9 @@ final class BreakableWal implements WriteAheadLog {
 
   @override
   HeldEntries read(String battleId) => _inner.read(battleId);
+
+  @override
+  void discard(String battleId) => _inner.discard(battleId);
 }
 
 /// What an [AccountCheck] under test knows: a valid JWT and an API key

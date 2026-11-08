@@ -25,6 +25,7 @@ void main() {
           host: host,
           hostId: 'host-1',
           mapIds: const {'valley'},
+          address: 'http://host-1:8080',
           reporter: RecordingErrorReporter(),
         ),
         poll: const Duration(seconds: 3),
@@ -95,6 +96,13 @@ void main() {
 
       final snapshot = (await snapshots.latest('b-1'))!;
       expect(snapshot.time, const Duration(minutes: 1));
+      // M6 Issue 6: uploaded whole, the battle is free for another host.
+      final row = BattleRow.fromData(
+        'b-1',
+        (await rows.get(AppwriteIds.battlesTableId, 'b-1'))!,
+      );
+      expect(row.host, isNull);
+      expect(host['b-1'], isNull);
     });
   });
 }

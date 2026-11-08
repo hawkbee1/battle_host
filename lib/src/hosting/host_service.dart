@@ -11,7 +11,8 @@ import 'package:battle_rules/battle_rules.dart';
 /// it runs the battles placed on it and reports those that ended
 /// ([placement]). Its [endpoints], when it has them, check their sockets
 /// after each tick. [stop] snapshots every battle and waits for the uploads
-/// before the process ends (stack decision 2).
+/// before the process ends (stack decision 2), then lets go of the battles
+/// all uploaded, for another host to take at once (M6 Issue 6).
 /// {@endtemplate}
 final class HostService {
   /// {@macro host_service}
@@ -59,7 +60,8 @@ final class HostService {
     await placement.report();
   }
 
-  /// Snapshots every battle and waits for the uploads under way.
+  /// Snapshots every battle, waits for the uploads under way, then lets
+  /// go of the battles whose log is all uploaded ([BattlePlacement.leave]).
   Future<void> stop() async {
     host.advance();
     for (final battle in host.battles.toList()) {
@@ -67,6 +69,7 @@ final class HostService {
     }
     host.advance();
     await host.settle();
+    await placement.leave();
   }
 }
 

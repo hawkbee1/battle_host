@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:battle_backend/battle_backend.dart';
 import 'package:battle_host/battle_host.dart';
+import 'package:battle_protocol/battle_protocol.dart';
 import 'package:battle_rules/battle_rules.dart';
 import 'package:hawkbee_schema/hawkbee_schema.dart';
 import 'package:test/test.dart';
@@ -135,14 +136,31 @@ void main() {
 
   setUp(() => reporter = RecordingErrorReporter());
 
-  BattlePlacement placementOf(Rows rows, SimulationHost host) =>
-      BattlePlacement(
-        rows: rows,
-        host: host,
-        hostId: 'host-1',
-        mapIds: const {'valley'},
-        reporter: reporter,
-      );
+  BattlePlacement placementOf(
+    Rows rows,
+    SimulationHost host, {
+    String hostId = 'host-1',
+  }) => BattlePlacement(
+    rows: rows,
+    host: host,
+    hostId: hostId,
+    mapIds: const {'valley'},
+    address: 'http://$hostId:8080',
+    reporter: reporter,
+  );
+
+  Future<HostRow?> hostRow(Rows rows, String hostId) async =>
+      switch (await rows.get(AppwriteIds.hostsTableId, hostId)) {
+        final data? => HostRow.fromData(data),
+        null => null,
+      };
+
+  /// Writes the `hosts` row of [hostId], last seen at [seenAt].
+  Future<void> seen(Rows rows, String hostId, DateTime seenAt) => rows.put(
+    AppwriteIds.hostsTableId,
+    hostId,
+    HostRow(address: 'http://$hostId:8080', seenAt: seenAt).toData(),
+  );
 
   Future<BattleRow> battleRow(Rows rows) async =>
       BattleRow.fromData('b-1', (await rows.get(_battles, 'b-1'))!);
@@ -174,9 +192,10 @@ void main() {
     });
 
     test('stack decision 1 runs a battle placed on it, and leaves the '
-        'battles of other hosts, other maps and other statuses', () async {
+        'battles of other live hosts, other maps and other statuses', () async {
       final mine = await warRows(host: 'host-1');
       final theirs = await warRows(host: 'host-2');
+      await seen(theirs, 'host-2', DateTime.utc(2026, 11, 6));
       final elsewhere = await warRows(mapId: 'saint_lo');
       final planned = await warRows();
       await planned.put(
@@ -319,6 +338,149 @@ void main() {
     });
   });
 
+  group('M6 Issue 6 where a battle runs', () {
+    final now = DateTime.utc(2026, 11, 6);
+
+    test('writes its public address and the time at each sync', () async {
+      final rows = await warRows();
+      final host = hostOn();
+      final placement = placementOf(rows, host);
+
+      await placement.sync();
+      expect(
+        (await hostRow(rows, 'host-1'))!.toData(),
+        HostRow(address: 'http://host-1:8080', seenAt: now).toData(),
+      );
+
+      (host.clock as ManualClock).advance(const Duration(seconds: 10));
+      await placement.sync();
+      expect(
+        (await hostRow(rows, 'host-1'))!.seenAt,
+        now.add(const Duration(seconds: 10)),
+      );
+    });
+
+    test('takes over the battle of a host not seen for its lease, or with '
+        'no row, from the uploads', () async {
+      for (final last in [now.subtract(const Duration(minutes: 1)), null]) {
+        final rows = await warRows();
+        final snapshots = MemorySnapshotStore();
+        final logs = MemoryLogSink();
+        final gone = hostOn(snapshots: snapshots, logs: logs);
+        await placementOf(rows, gone, hostId: 'host-2').sync();
+        await gone.settle();
+        if (last == null) {
+          await rows.delete(AppwriteIds.hostsTableId, 'host-2');
+        } else {
+          await seen(rows, 'host-2', last);
+        }
+        final next = hostOn(snapshots: snapshots, logs: logs);
+
+        expect(await placementOf(rows, next).sync(), ['b-1']);
+
+        expect((await battleRow(rows)).host, 'host-1');
+        expect(next['b-1']!.state.units.keys, gone['b-1']!.state.units.keys);
+      }
+    });
+
+    test('leaves the battle of a host seen within its lease', () async {
+      final rows = await warRows(host: 'host-2');
+      await seen(rows, 'host-2', now.subtract(const Duration(seconds: 59)));
+
+      expect(await placementOf(rows, hostOn()).sync(), isEmpty);
+      expect((await battleRow(rows)).host, 'host-2');
+    });
+
+    test('discards its own write-ahead log of a battle it claims: another '
+        'host may have run it since', () async {
+      final rows = await warRows();
+      final wal = MemoryWriteAheadLog();
+      final stale = hostOn(wal: wal);
+      await placementOf(rows, stale).sync();
+      expect(wal.read('b-1').entries, isNotEmpty);
+      await rows.put(
+        _battles,
+        'b-1',
+        (await battleRow(rows)).copyWith(host: () => null).toData(),
+      );
+      final again = hostOn(wal: wal);
+
+      // A start at position 0 over the stale log would be refused.
+      expect(await placementOf(rows, again).sync(), ['b-1']);
+      expect(reporter.reports, isEmpty);
+    });
+
+    test('stops running a battle that moved to another host, and claims it '
+        'again once free', () async {
+      final rows = await warRows();
+      final host = hostOn();
+      final placement = placementOf(rows, host);
+      await placement.sync();
+      await seen(rows, 'host-2', now);
+      await rows.put(
+        _battles,
+        'b-1',
+        (await battleRow(rows)).copyWith(host: () => 'host-2').toData(),
+      );
+
+      expect(await placement.sync(), isEmpty);
+      expect(host['b-1'], isNull);
+      expect(host.failed, isEmpty);
+      expect(
+        () => host.subscribe('b-1', 's-1', _Silent()),
+        throwsArgumentError,
+      );
+
+      await rows.put(
+        _battles,
+        'b-1',
+        (await battleRow(rows)).copyWith(host: () => null).toData(),
+      );
+      expect(await placement.sync(), ['b-1']);
+    });
+
+    test('lets go of its battles all uploaded when it leaves, and of its '
+        'row', () async {
+      final rows = await warRows();
+      final host = hostOn();
+      final placement = placementOf(rows, host);
+      await placement.sync();
+
+      // Its first snapshot is not uploaded yet.
+      await placement.leave();
+      expect((await battleRow(rows)).host, 'host-1');
+      expect(host['b-1'], isNotNull);
+      expect(await hostRow(rows, 'host-1'), isNull);
+
+      await host.settle();
+      await placement.leave();
+      expect((await battleRow(rows)).host, isNull);
+      expect(host['b-1'], isNull);
+    });
+
+    test('keeps the battles it runs whose row names another host or is '
+        'gone when it leaves', () async {
+      final rows = await warRows();
+      final host = hostOn();
+      final placement = placementOf(rows, host);
+      await placement.sync();
+      await host.settle();
+      await rows.put(
+        _battles,
+        'b-1',
+        (await battleRow(rows)).copyWith(host: () => 'host-2').toData(),
+      );
+
+      await placement.leave();
+      expect((await battleRow(rows)).host, 'host-2');
+
+      await rows.delete(_battles, 'b-1');
+      await placement.leave();
+      expect(await rows.get(_battles, 'b-1'), isNull);
+      expect(host['b-1'], isNotNull);
+    });
+  });
+
   group('resultOf', () {
     test('SOC-47 counts all the section XP of a battle with no setup as '
         'earned in it, and none with no section share', () async {
@@ -363,4 +525,9 @@ void main() {
       expect(resultOf(shareless, null).earned, {'s-1': 0.0, 's-2': 0.0});
     });
   });
+}
+
+final class _Silent implements SectionSubscriber {
+  @override
+  void send(HostMessage message) {}
 }

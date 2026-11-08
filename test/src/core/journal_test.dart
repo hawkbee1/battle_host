@@ -22,6 +22,9 @@ final class _FullDisk implements WriteAheadLog {
 
   @override
   HeldEntries read(String battleId) => (from: 0, entries: const []);
+
+  @override
+  void discard(String battleId) {}
 }
 
 void main() {

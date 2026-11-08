@@ -44,22 +44,35 @@ built by [battle_map](https://github.com/hawkbee1/battle_map)'s `build_map`.
 
 ```sh
 battle_host serve --plan <plan> --maps <built maps> --map <id> [--map <id>...] \
-  --data <write-ahead logs> [--host-id <id>] [--poll 10]
+  --data <write-ahead logs> [--host-id <id>] [--port 8080] \
+  [--public-address <url>] [--poll 10] [--lease 60]
 ```
 
 `serve` is the process of one container. It prepares the path searches of its maps, then
 every `--poll` seconds runs the battles placed on it and reports those that ended
-(`BattlePlacement`, over hawkbee's `battles`, `sections`, `wars` and `guilds` tables):
+(`BattlePlacement`, over hawkbee's `bt_battles`, `bt_sections`, `bt_wars`, `bt_guilds` and
+`bt_hosts` tables):
 
-- **Placement**: it claims each `running` battle of its maps whose row has no `host`, by
-  writing its `--host-id` (the container's `HOSTNAME` by default), and runs the battles
-  that name it: recovered from their snapshot, or started from their rows.
+- **Address**: it writes its `--public-address` and the time in its `bt_hosts` row. Clients
+  ask the `bt_battle_host` function for the address of their battle's host; `bt_hosts`
+  grants no client any permission. Live, the address is the host's `https://` name behind
+  the reverse proxy that ends TLS; by default it is `http://<host-id>:<port>`, its name on
+  the Docker network.
+- **Placement**: it claims each `running` battle of its maps whose row has no `host`, or
+  names a host whose `bt_hosts` row is older than `--lease`, by writing its `--host-id` (the
+  container's `HOSTNAME` by default), and runs the battles that name it: recovered from
+  their snapshot, or started from their rows. A battle it claims starts from its uploads,
+  its own write-ahead log of it discarded. A battle it runs whose row names another host
+  has moved: it stops running it, and its sockets close so that their clients look again.
 - **End**: once a battle has a winner, its row gets status `ended`, the winner and a
   `BattleResult`, which triggers the `end_battle` function.
 
-Every battle advances each second. SIGTERM (`docker stop`) snapshots every battle and
-waits for the uploads. Appwrite comes from `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID` and
-`APPWRITE_API_KEY` (tables and storage scopes).
+Every battle advances each second. Players and AI agents reach the endpoints on `--port`
+(`GET /v1/socket`, `POST /v1/battles/<battle>/commands`). SIGTERM (`docker stop`)
+snapshots every battle, waits for the uploads, then lets go of the battles all uploaded
+and deletes its `bt_hosts` row, so that another container takes them at its next look.
+Appwrite comes from `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID` and `APPWRITE_API_KEY`
+(tables and storage scopes).
 
 The Docker image is the AOT executable, the plan's data and the maps, on the Dart runtime
 files (any linux/amd64 host):
@@ -71,7 +84,9 @@ APPWRITE_API_KEY=<key> docker compose -f docker/compose.yaml up -d
 ```
 
 `docker/compose.yaml` runs one container per map on the local Appwrite's network
-(`hermes-net`, endpoint `http://appwrite/v1`); keep its `/data` volume.
+(`hermes-net`, endpoint `http://appwrite-traefik/v1`), port 8080 published as 8081; keep
+its `/data` volume. Its comments say how to reach it from the LAN and how to start a spare
+container of the same map.
 
 ## Load test
 

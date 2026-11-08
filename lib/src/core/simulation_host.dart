@@ -294,6 +294,25 @@ final class SimulationHost {
   /// the process stops.
   Future<void> settle() => _journal.settle();
 
+  /// Whether every entry of the battle [battleId] and its latest snapshot
+  /// are uploaded, so that another host recovers it whole (M6 Issue 6).
+  ///
+  /// Throws an [ArgumentError] for a battle that does not run.
+  bool saved(String battleId) => _journal.saved(battleId);
+
+  /// Stops running the battle [battleId], without failing it: another
+  /// host runs it now (M6 Issue 6). What waits for upload stays in the
+  /// write-ahead log only, and nothing more of it is uploaded from here.
+  /// Its subscribers get nothing more; the endpoints close their sockets
+  /// at their next tick, and their clients find its new host.
+  void release(String battleId) {
+    _battles.remove(battleId);
+    _startedAt.remove(battleId);
+    _commands.remove(battleId);
+    _streams.remove(battleId);
+    _journal.close(battleId);
+  }
+
   void _checkFree(String battleId) {
     if (_battles.containsKey(battleId)) {
       throw ArgumentError.value(battleId, 'battleId', 'already runs');

@@ -29,7 +29,10 @@ import 'package:mason_logger/mason_logger.dart';
 /// passes SIGTERM and SIGINT; never by default), then snapshots them.
 /// Players and AI agents reach them on `--address` and `--port`
 /// (`HostServer`): JWTs are checked with Appwrite Auth, API keys in the
-/// `bt_api_keys` table.
+/// `bt_api_keys` table. Clients find it at `--public-address`, which it
+/// writes in its `bt_hosts` row at each poll; the battles of a host whose
+/// row is older than `--lease` move to another host of their map (M6
+/// Issue 6).
 ///
 /// Appwrite comes from `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID` and
 /// `APPWRITE_API_KEY`; errors go to Sentry when `SENTRY_DSN` is set.
@@ -65,9 +68,23 @@ final class ServeCommand extends Command<int> {
             'The port of the endpoints: WebSocket and HTTPS behind the proxy.',
       )
       ..addOption(
+        'public-address',
+        help:
+            'The base URL clients reach the endpoints at: https://… behind '
+            'the reverse proxy live; http://<host-id>:<port> by default, '
+            'its name on the Docker network.',
+      )
+      ..addOption(
         'poll',
         defaultsTo: '10',
         help: 'Seconds between two looks at the battles placed here.',
+      )
+      ..addOption(
+        'lease',
+        defaultsTo: '60',
+        help:
+            'Seconds after its last look before another host of its maps '
+            'takes its battles; more than --poll.',
       );
   }
 
@@ -105,10 +122,17 @@ final class ServeCommand extends Command<int> {
     if (poll == null || poll < 1) {
       usageException('--poll takes a whole number of seconds.');
     }
+    final lease = int.tryParse(args.option('lease')!);
+    if (lease == null || lease <= poll) {
+      usageException('--lease takes more seconds than --poll.');
+    }
     final port = int.tryParse(args.option('port')!);
     if (port == null || port < 0 || port > 65535) {
       usageException('--port takes a port number.');
     }
+    final address = publicAddress(
+      args.option('public-address') ?? 'http://$hostId:$port',
+    );
     final client = Client()
       ..setEndpoint(variable('APPWRITE_ENDPOINT'))
       ..setProject(variable('APPWRITE_PROJECT_ID'))
@@ -156,12 +180,16 @@ final class ServeCommand extends Command<int> {
         host: host,
         hostId: hostId,
         mapIds: mapIds,
+        address: address,
+        lease: Duration(seconds: lease),
         reporter: reporter,
       ),
       poll: Duration(seconds: poll),
     );
 
-    _logger.info('host=$hostId maps=${mapIds.join(',')} starting');
+    _logger.info(
+      'host=$hostId maps=${mapIds.join(',')} address=$address starting',
+    );
     await _guarded(service.start, reporter.report);
     final server = await HostServer.bind(
       endpoints,
@@ -177,13 +205,32 @@ final class ServeCommand extends Command<int> {
       if (!stopping) await _guarded(service.tick, reporter.report);
     }
     await server.close();
-    await service.stop();
+    await _guarded(service.stop, reporter.report);
     await sentry?.close();
     _logger.info(
       'host=$hostId stopped battles=${host.battles.length} '
       'failed=${host.failed.length}',
     );
     return ExitCode.success.code;
+  }
+
+  /// The public address [text], an `http` or `https` URL with a host and
+  /// no query, without its trailing slash.
+  ///
+  /// Throws a [UsageException] for anything else.
+  String publicAddress(String text) {
+    final uri = Uri.tryParse(text);
+    if (uri == null ||
+        !{'http', 'https'}.contains(uri.scheme) ||
+        uri.host.isEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      usageException('--public-address takes an http or https URL.');
+    }
+    final address = uri.toString();
+    return address.endsWith('/')
+        ? address.substring(0, address.length - 1)
+        : address;
   }
 
   /// Runs [work]; an error goes to [report] and the host goes on.

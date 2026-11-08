@@ -8,15 +8,26 @@ import 'package:hawkbee_schema/hawkbee_schema.dart';
 
 /// {@template battle_placement}
 /// Which host runs which battle (stack decision 1, hosting), recorded in
-/// the `battles` rows of the Hawkbee database (M5 Issue 19).
+/// the `battles` rows of the Hawkbee database (M5 Issue 19), and where
+/// clients reach it, in the `hosts` rows (M6 Issue 6).
 ///
-/// A host process serves its [mapIds]. When it [sync]s, it claims each
-/// running battle on one of them that no host holds, by writing its
-/// [hostId] in the row's `host`, and runs the battles that name it: a
+/// A host process serves its [mapIds]. When it [sync]s, it writes its
+/// public [address] and the time in its `hosts` row, then claims each
+/// running battle on one of its maps that no live host holds, by writing
+/// its [hostId] in the row's `host`, and runs the battles that name it: a
 /// battle with a snapshot is recovered (stack decision 2), the others start
-/// from their rows. Two hosts of one map may claim the same battle at
-/// once: the row keeps the last write, and the host it does not name lets
-/// the battle go.
+/// from their rows. A host is live while its `hosts` row is younger than
+/// the [lease]; the battles of one that is not (stopped, or cut off from
+/// Appwrite) move to another host of their map. Two hosts of one map may
+/// claim the same battle at once: the row keeps the last write, and the
+/// host it does not name lets the battle go.
+///
+/// A battle it runs whose row names another host has moved: it stops
+/// running it, and the endpoints send its clients to look for the new
+/// host. A battle it claims may have run elsewhere since this host last
+/// held it, so its own write-ahead log of it is discarded: the uploaded
+/// log is its history. A host that [leave]s lets go of its battles whose
+/// log is all uploaded, so that another host takes them at once.
 ///
 /// Once a battle has ended, [report] writes its result in its row (status
 /// `ended`, winner, `BattleResult`), which triggers `end_battle`
@@ -29,7 +40,9 @@ final class BattlePlacement {
     required this.host,
     required this.hostId,
     required this.mapIds,
+    required this.address,
     required this.reporter,
+    this.lease = const Duration(minutes: 1),
   });
 
   /// The tables of the Hawkbee database.
@@ -44,6 +57,14 @@ final class BattlePlacement {
   /// The maps it serves.
   final Set<String> mapIds;
 
+  /// Its public address, the base URL of its endpoints, in its `hosts`
+  /// row: `https://…` live, behind the reverse proxy that ends TLS.
+  final String address;
+
+  /// How long a host is live after it last wrote its `hosts` row: several
+  /// syncs, so that one slow look at the battles moves none.
+  final Duration lease;
+
   /// Where errors go.
   final ErrorReporter reporter;
 
@@ -51,22 +72,43 @@ final class BattlePlacement {
   final _reported = <String>{};
 
   static const String _battles = AppwriteIds.battlesTableId;
+  static const String _hosts = AppwriteIds.hostsTableId;
 
-  /// Claims the running battles of its maps that no host holds and runs
-  /// those that name it; returns the battles it began to run. A battle
-  /// that fails to start or recover is reported and tried again at the
-  /// next sync.
+  /// Writes its `hosts` row, lets go of the battles that moved, claims the
+  /// running battles of its maps that no live host holds, and runs those
+  /// that name it; returns the battles it began to run. A battle that
+  /// fails to start or recover is reported and tried again at the next
+  /// sync.
   Future<List<String>> sync() async {
+    final now = host.clock.now();
+    await rows.put(
+      _hosts,
+      hostId,
+      HostRow(address: address, seenAt: now).toData(),
+    );
     final begun = <String>[];
     final found = await rows.find(_battles, {
       'status': BattleStatus.running.name,
     });
+    final live = <String, bool>{};
     for (final (:id, :data) in found) {
       final row = BattleRow.fromData(id, data);
-      if (!mapIds.contains(row.mapId) || host[id] != null) continue;
-      if (row.host != null && row.host != hostId) continue;
+      if (!mapIds.contains(row.mapId)) continue;
+      final named = row.host;
+      if (host[id] != null) {
+        if (named != hostId) _let(id);
+        continue;
+      }
+      if (named != null &&
+          named != hostId &&
+          (live[named] ??= await _live(named, now))) {
+        continue;
+      }
       try {
-        if (row.host == null && !await _claim(row)) continue;
+        if (named != hostId) {
+          if (!await _claim(row)) continue;
+          host.wal.discard(id);
+        }
         final setup = await setupOf(row);
         _setups[id] = setup;
         if (await host.snapshots.latest(id) == null) {
@@ -82,8 +124,35 @@ final class BattlePlacement {
     return begun;
   }
 
+  /// Lets go of every battle it runs whose log is all uploaded, in their
+  /// rows, and deletes its `hosts` row: the host stops, after its battles'
+  /// last snapshots ([SimulationHost.settle]). Its other battles move once
+  /// its lease ends, or come back to it if it starts again first.
+  Future<void> leave() async {
+    for (final battle in host.battles.toList()) {
+      if (!host.saved(battle.id)) continue;
+      final data = await rows.get(_battles, battle.id);
+      if (data == null) continue;
+      final row = BattleRow.fromData(battle.id, data);
+      if (row.host != hostId) continue;
+      await rows.put(_battles, row.id, row.copyWith(host: () => null).toData());
+      _let(battle.id);
+    }
+    await rows.delete(_hosts, hostId);
+  }
+
+  void _let(String battleId) {
+    host.release(battleId);
+    _setups.remove(battleId);
+  }
+
+  Future<bool> _live(String other, DateTime now) async {
+    final data = await rows.get(_hosts, other);
+    return data != null && HostRow.fromData(data).aliveAt(now, lease);
+  }
+
   Future<bool> _claim(BattleRow row) async {
-    await rows.put(_battles, row.id, row.copyWith(host: hostId).toData());
+    await rows.put(_battles, row.id, row.copyWith(host: () => hostId).toData());
     final again = await rows.get(_battles, row.id);
     return again != null && BattleRow.fromData(row.id, again).host == hostId;
   }

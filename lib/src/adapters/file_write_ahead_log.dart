@@ -55,6 +55,13 @@ final class FileWriteAheadLog implements WriteAheadLog {
     return (from: held.from, entries: _codec.decodeLog(held.log));
   }
 
+  @override
+  void discard(String battleId) {
+    final file = File(_path(battleId));
+    _files.remove(battleId)?.$1.closeSync();
+    if (file.existsSync()) file.deleteSync();
+  }
+
   /// Closes the open files.
   void close() {
     for (final (file, _) in _files.values) {

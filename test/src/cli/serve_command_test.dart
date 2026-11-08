@@ -85,7 +85,11 @@ void main() {
       stop.complete();
 
       expect(await code, ExitCode.success.code);
-      verify(() => logger.info('host=host-1 maps=valley starting')).called(1);
+      verify(
+        () => logger.info(
+          'host=host-1 maps=valley address=http://host-1:0 starting',
+        ),
+      ).called(1);
       verify(
         () => logger.info(any(that: startsWith('host=host-1 listening port='))),
       ).called(1);
@@ -109,8 +113,33 @@ void main() {
         ),
         ExitCode.success.code,
       );
-      verify(() => logger.info('host=container-7 maps=valley starting'))
-          .called(1);
+      verify(
+        () => logger.info(
+          'host=container-7 maps=valley address=http://container-7:0 starting',
+        ),
+      ).called(1);
+    });
+
+    test('M6 Issue 6 writes the public address it is given, live behind '
+        'the proxy', () async {
+      expect(
+        await serve([
+          ...base(),
+          '--port',
+          '0',
+          '--public-address',
+          'https://h1.battleteam.example/',
+          '--lease',
+          '30',
+        ]),
+        ExitCode.success.code,
+      );
+      verify(
+        () => logger.info(
+          'host=host-1 maps=valley address=https://h1.battleteam.example '
+          'starting',
+        ),
+      ).called(1);
     });
 
     test('needs its options and Appwrite', () async {
@@ -119,6 +148,13 @@ void main() {
         (base()..removeRange(4, 6), _appwrite),
         (base()..removeRange(8, 10), _appwrite),
         ([...base(), '--poll', '0'], _appwrite),
+        ([...base(), '--lease', '10'], _appwrite),
+        ([...base(), '--lease', 'x'], _appwrite),
+        ([...base(), '--public-address', 'ws://h1:8080'], _appwrite),
+        ([...base(), '--public-address', 'http:///v1'], _appwrite),
+        ([...base(), '--public-address', 'http://h1?a=1'], _appwrite),
+        ([...base(), '--public-address', 'http://h1#a'], _appwrite),
+        ([...base(), '--public-address', '::'], _appwrite),
         ([...base(), '--port', 'x'], _appwrite),
         ([...base(), '--port', '70000'], _appwrite),
         (base(), const <String, String>{}),
