@@ -1,5 +1,6 @@
 import 'package:battle_host/src/core/battle.dart';
 import 'package:battle_host/src/core/battle_state.dart';
+import 'package:battle_host/src/fog/fog_of_war.dart';
 import 'package:battle_host/src/orders/order_chain.dart';
 import 'package:battle_host/src/orders/refusal.dart';
 import 'package:battle_host/src/orders/relics.dart';
@@ -120,6 +121,9 @@ final class CommandHandler {
     world: world,
     relics: relics,
   );
+
+  /// What each section sees, and the scouts' reports (MAP-29, COMBAT-12).
+  late final fog = FogOfWar(battle: battle, world: world, vision: _vision);
 
   /// The fire checks of the server-managed sections' units.
   late final servers = ServerSections(
@@ -938,9 +942,11 @@ final class CommandHandler {
   (_Aim?, Enum?) _aim(UnitState unit, String targetId) {
     final weapon = unit.weapon.weapon;
     if (weapon == null) return (null, WeaponRefusal.noWeapon);
-    final (cell, flying, armor, defense) = switch (_targetCell(targetId)) {
+    final (cell, flying, armor, defense, height) = switch (_targetCell(
+      targetId,
+    )) {
       final found? => found,
-      null => (null, false, '', 0.0),
+      null => (null, false, '', 0.0, 0.0),
     };
     if (cell == null) return (null, HostRule.unknownTarget);
     if (flying && weapon.airborneFactor == 0) {
@@ -951,6 +957,8 @@ final class CommandHandler {
       cell,
       fromFlying: unit.flying,
       toFlying: flying,
+      fromHeightM: unit.type.hitBox.height,
+      toHeightM: height,
     );
     if (line.distanceM > weapon.rangeM) return (null, HostRule.outOfRange);
     if (!_vision.canFireAt(
@@ -1000,13 +1008,14 @@ final class CommandHandler {
     });
   }
 
-  /// The cell of [targetId], whether it flies, its armor and defense.
-  (CellRef, bool, String, double)? _targetCell(String targetId) {
+  /// The cell of [targetId], whether it flies, its armor and defense, and
+  /// the height of its hit volume.
+  (CellRef, bool, String, double, double)? _targetCell(String targetId) {
     if (targetId.startsWith('hq-')) {
       final team = _state.teams[targetId.substring(3)];
       return team == null || team.eliminated
           ? null
-          : (team.hq.cell, false, 'hq', 0.0);
+          : (team.hq.cell, false, 'hq', 0.0, battle.settings.hq.hitBox.height);
     }
     final target = _state.units[targetId];
     if (target == null || !target.onField) return null;
@@ -1015,6 +1024,7 @@ final class CommandHandler {
       target.flying,
       target.type.armorType,
       target.type.stats.defense,
+      target.type.hitBox.height,
     );
   }
 
@@ -1218,29 +1228,13 @@ final class CommandHandler {
     if (aimed == null) return refused(HostRule.offMap);
     final distance = world.distanceM(unit.cell!, aimed);
     final section = unit.sectionId;
-    bool sees(UnitState observer) => _vision.unitSees(
-      unit: observer.type,
-      weather: _state.weather,
-      line: world.sightLine(observer.cell!, aimed, fromFlying: observer.flying),
-      time: _now,
-      observation: observer.observation,
-    );
+    bool sees(UnitState observer) => fog.seesGround(observer, aimed);
     final onField = _state.units.values.where((u) => u.onField).toList();
     final seen = onField.any((u) => u.sectionId == section && sees(u));
+    // The scouts' reports are those of the fog of war (MAP-29, UNIT-36).
     final relayed =
         weapon.indirectFire &&
-        onField.any(
-          (scout) =>
-              scout.type.role.reportsToRadio &&
-              _teamOf(scout) == _teamOf(unit) &&
-              sees(scout) &&
-              onField.any(
-                (radio) =>
-                    radio.sectionId == section &&
-                    radio.type.role.relayRange != null &&
-                    _within(radio, scout.cell!, radio.type.role.relayRange!),
-              ),
-        );
+        fog.reportingScouts(_teamOf(unit)).any((id) => sees(_state.units[id]!));
     if (distance > weapon.rangeM) return refused(HostRule.outOfRange);
     // Artillery fires at what its section sees or a scout reports
     // (COMBAT-12); the explosive charge goes off on a point its engineer

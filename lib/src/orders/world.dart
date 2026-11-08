@@ -95,26 +95,40 @@ final class World implements ObstacleQuery {
   /// cells, the forest it crosses and the terrain and objects that may
   /// block it. A line from or to a flying unit passes over the ground in
   /// between.
+  ///
+  /// The line runs from [fromHeightM] above the observer's point (the top
+  /// of its hit volume) to [toHeightM] above the target's; where the ground
+  /// rises above it, a hill blocks it (MAP-26, vision in 3D; assumed in
+  /// Q-MAP-25).
   SightLine sightLine(
     CellRef from,
     CellRef to, {
     bool fromFlying = false,
     bool toFlying = false,
+    double fromHeightM = 0,
+    double toHeightM = 0,
   }) {
     final between = fromFlying || toFlying
         ? const <CellRef>[]
         : _between(from, to);
+    final fromZ = pointOf(from).z + fromHeightM;
+    final toZ = pointOf(to).z + toHeightM;
+    final length = distanceM(from, to);
     var forest = 0.0;
+    var hill = false;
     final obstacles = <SightObstacle>[];
     for (final cell in between) {
+      final share = distanceM(from, cell) / length;
+      hill = hill || _nav.cellAt(cell)!.height > fromZ + (toZ - fromZ) * share;
       obstacles.add(TerrainObstacle(terrainOf(cell)));
       for (final object in objectsOn(cell)) {
         obstacles.add(ObjectObstacle(object));
         if (terrain.objects[object]?.conceals == 'forest') forest += cellSizeM;
       }
     }
+    if (hill) obstacles.add(const GroundObstacle());
     return SightLine(
-      distanceM: distanceM(from, to),
+      distanceM: length,
       observerTerrain: terrainOf(from),
       heightAboveTargetM:
           pointOf(from, flying: fromFlying).z - pointOf(to, flying: toFlying).z,

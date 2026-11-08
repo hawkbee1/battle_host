@@ -227,15 +227,25 @@ final class SimulationHost {
     }
   }
 
-  /// Brings every battle to the clock's time, then uploads the log batches
-  /// and takes the snapshots due (stack decision 2). A battle that fails
-  /// is reported and stopped; the others go on.
-  void advance() {
+  /// The host's tick: brings every battle to the clock's time, then uploads
+  /// the log batches and takes the snapshots due (stack decision 2), then,
+  /// when [see], brings every battle's fog of war up to date ([see]). A
+  /// battle that fails is reported and stopped; the others go on.
+  void advance({bool see = true}) {
     final now = clock.now();
     for (final MapEntry(key: id, value: battle) in _battles.entries.toList()) {
       _advance(id, battle, now);
     }
     _journal.tick(now);
+    if (see) this.see();
+  }
+
+  /// Brings every battle's visible sets to its state, once per tick
+  /// (M6 Issue 3). A battle that fails is reported and stopped.
+  void see() {
+    for (final MapEntry(key: id, value: battle) in _battles.entries.toList()) {
+      _guard(id, battle.orders.fog.sync);
+    }
   }
 
   /// Takes a snapshot of the battle [battleId] now: before a planned stop,
@@ -264,9 +274,12 @@ final class SimulationHost {
     );
   }
 
-  void _advance(String id, Battle battle, DateTime now) {
+  void _advance(String id, Battle battle, DateTime now) =>
+      _guard(id, () => battle.advanceTo(now.difference(_startedAt[id]!)));
+
+  void _guard(String id, void Function() work) {
     try {
-      battle.advanceTo(now.difference(_startedAt[id]!));
+      work();
     } on Object catch (error, stackTrace) {
       _fail(id, error, stackTrace);
     }

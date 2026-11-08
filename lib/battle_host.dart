@@ -23,6 +23,7 @@ export 'src/core/shared_map.dart';
 export 'src/core/simulation_host.dart';
 export 'src/core/snapshot_codec.dart';
 export 'src/core/timer_queue.dart';
+export 'src/fog/fog_of_war.dart';
 export 'src/hosting/battle_placement.dart';
 export 'src/hosting/host_service.dart';
 export 'src/orders/command_handler.dart';
