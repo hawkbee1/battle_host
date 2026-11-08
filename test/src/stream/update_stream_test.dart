@@ -512,13 +512,23 @@ void main() {
 
         final three = holders['s-3']!.received.whereType<TickUpdate>().single;
         expect(three.events, isEmpty);
-        expect(three.unseenHits, equals(shot.impacts));
+        expect(
+          three.unseenHits,
+          equals([
+            const UnseenHit(
+              targetId: 'soldier-3',
+              damage: 12,
+              result: ImpactResult.damaged,
+            ),
+          ]),
+        );
         expect(holders['s-1']!.received.whereType<TickUpdate>(), isEmpty);
       });
 
-      test('stack decision 3 a unit shots of one update are grouped into one '
-          'burst; a shot alone stays an event, cut to what it hits that the '
-          'section knows', () {
+      test('stack decision 3 COMBAT-58 decision 237 a unit shots of one update '
+          'are grouped into one burst, a shot alone stays an event; a shot '
+          'whose outcome the section does not see shows as fired, with no '
+          'clue of the unseen', () {
         Attacked shot(String target, double damage) => Attacked(
           attackerId: 'soldier-2',
           sectionId: 's-2',
@@ -544,20 +554,37 @@ void main() {
             .single
             .bursts
             .single;
-        expect(burst.shots, 3);
+        expect(burst.shots, 2);
         expect(burst.hits, 2);
         expect(burst.impacts.single.damage, 7);
+        final unknown = holders['s-1']!.received
+            .whereType<TickUpdate>()
+            .single
+            .fired
+            .single;
+        expect(unknown.shots, 1);
+        expect(unknown.impacts, isEmpty);
 
-        heard([shot('soldier-3', 5)]);
-        final alone =
-            holders['s-1']!.received
-                    .whereType<TickUpdate>()
-                    .single
-                    .events
-                    .single
-                as Attacked;
-        expect(alone.impacts, isEmpty);
-        expect(alone.hit, isFalse);
+        heard([shot('soldier-1', 5)]);
+        final alone = holders['s-1']!.received
+            .whereType<TickUpdate>()
+            .single
+            .events
+            .single;
+        expect(alone, equals(shot('soldier-1', 5)));
+
+        heard(const [
+          Attacked(
+            attackerId: 'soldier-2',
+            sectionId: 's-2',
+            weapon: 'rifle',
+            hit: false,
+            impacts: [],
+          ),
+        ]);
+        final missed = holders['s-1']!.received.whereType<TickUpdate>().single;
+        expect(missed.events, isEmpty);
+        expect(missed.fired.single.shots, 1);
       });
 
       test('HQ-29 a unit stored leaves the other sections views, and stays '

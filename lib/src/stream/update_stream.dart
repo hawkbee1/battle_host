@@ -39,9 +39,10 @@ final class _Sent {
 ///
 /// What a section receives names only the units it sees before or after
 /// the change, its own units, and what every section knows (MAP-49). Per
-/// event type, see [_visibility]; shots no rule covers are assumed in
-/// Q-CBT-39. A moving unit's position is the one the host holds, its
-/// destination from the start of its move (decision 236). Its relic alerts
+/// event type, see [_visibility]; for shots, COMBAT-57 and COMBAT-58:
+/// the unseen leaves no clue (decision 237). A moving unit's position is
+/// the one the host holds, its destination from the start of its move
+/// (decision 236). Its relic alerts
 /// reach the previous owner team's players at once, or on their next
 /// connection (RELIC-10, decision 233, `PendingAlerts`).
 /// {@endtemplate}
@@ -168,7 +169,11 @@ final class UpdateStream {
       sent.positions.remove(id);
       sent.own.remove(id);
     }
-    final (events, bursts, unseenHits) = _events(sectionId, known, knownHqs);
+    final (events, bursts, fired, unseenHits) = _events(
+      sectionId,
+      known,
+      knownHqs,
+    );
     final section = views.section(sectionId);
     final hqs = <HqView>[
       for (final team in sight.hqs)
@@ -194,6 +199,7 @@ final class UpdateStream {
       events: events,
       bursts: bursts,
       unseenHits: unseenHits,
+      fired: fired,
       ownUnits: ownUnits,
       section: section == sent.section ? null : section,
       hqs: hqs,
@@ -215,9 +221,11 @@ final class UpdateStream {
   }
 
   /// The events of the entries heard since the last flush that
-  /// [sectionId] may see, each unit's shots grouped into bursts, and the
-  /// hits on units it knows by shooters it does not see (COMBAT-57).
-  (List<BattleEvent>, List<Burst>, List<Impact>) _events(
+  /// [sectionId] may see; a seen unit's shots that hit only units it knows,
+  /// grouped into bursts; its other shots, outcome unknown, with only the
+  /// hits it sees (COMBAT-58); and the hits on units it knows by shooters it
+  /// does not see (COMBAT-57). The unseen leaves no clue (decision 237).
+  (List<BattleEvent>, List<Burst>, List<Fired>, List<UnseenHit>) _events(
     String sectionId,
     Set<String> known,
     Set<String> knownHqs,
@@ -228,7 +236,8 @@ final class UpdateStream {
         : known.contains(id) || !_isUnit(id);
     final events = <BattleEvent>[];
     final shots = <String, List<Attacked>>{};
-    final unseenHits = <Impact>[];
+    final unknown = <String, List<Attacked>>{};
+    final unseenHits = <UnseenHit>[];
     for (final event in _heard.expand((entry) => entry.events)) {
       switch (_visibility(event, sectionId, team, knows)) {
         case _Visibility.shown:
@@ -241,18 +250,29 @@ final class UpdateStream {
             for (final impact in attacked.impacts)
               if (knows(impact.targetId)) impact,
           ];
-          if (knows(attacked.attackerId)) {
-            (shots[attacked.attackerId] ??= []).add(
+          if (!knows(attacked.attackerId)) {
+            unseenHits.addAll([
+              for (final impact in impacts)
+                UnseenHit(
+                  targetId: impact.targetId,
+                  damage: impact.damage,
+                  result: impact.result,
+                ),
+            ]);
+          } else if (attacked.hit &&
+              impacts.isNotEmpty &&
+              impacts.length == attacked.impacts.length) {
+            (shots[attacked.attackerId] ??= []).add(attacked);
+          } else {
+            (unknown[attacked.attackerId] ??= []).add(
               Attacked(
                 attackerId: attacked.attackerId,
                 sectionId: attacked.sectionId,
                 weapon: attacked.weapon,
-                hit: attacked.hit && impacts.isNotEmpty,
+                hit: false,
                 impacts: impacts,
               ),
             );
-          } else {
-            unseenHits.addAll(impacts);
           }
       }
     }
@@ -262,29 +282,49 @@ final class UpdateStream {
         events.add(fired.single);
         continue;
       }
-      final hit = <String, Impact>{};
-      for (final impact in fired.expand((shot) => shot.impacts)) {
-        final before = hit[impact.targetId];
-        hit[impact.targetId] = Impact(
-          targetId: impact.targetId,
-          targetType: impact.targetType,
-          damage: (before?.damage ?? 0) + impact.damage,
-          friendly: impact.friendly,
-          result: impact.result,
-        );
-      }
       bursts.add(
         Burst(
           attackerId: attacker,
           sectionId: fired.first.sectionId,
           weapon: fired.first.weapon,
           shots: fired.length,
-          hits: fired.where((shot) => shot.hit).length,
-          impacts: hit.values.toList(),
+          hits: fired.length,
+          impacts: _merged(fired),
         ),
       );
     }
-    return (events, bursts, unseenHits);
+    return (
+      events,
+      bursts,
+      [
+        for (final MapEntry(key: attacker, value: shots) in unknown.entries)
+          Fired(
+            attackerId: attacker,
+            sectionId: shots.first.sectionId,
+            weapon: shots.first.weapon,
+            shots: shots.length,
+            impacts: _merged(shots),
+          ),
+      ],
+      unseenHits,
+    );
+  }
+
+  /// The hits of [shots], each unit hit once with the damage of all of
+  /// them and its last result.
+  static List<Impact> _merged(List<Attacked> shots) {
+    final hit = <String, Impact>{};
+    for (final impact in shots.expand((shot) => shot.impacts)) {
+      final before = hit[impact.targetId];
+      hit[impact.targetId] = Impact(
+        targetId: impact.targetId,
+        targetType: impact.targetType,
+        damage: (before?.damage ?? 0) + impact.damage,
+        friendly: impact.friendly,
+        result: impact.result,
+      );
+    }
+    return hit.values.toList();
   }
 
   /// Whether [id] names a unit of the battle, now or at the last flush;

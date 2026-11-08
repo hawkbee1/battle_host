@@ -54,7 +54,12 @@ final class ViewHolder implements SectionSubscriber {
         for (final burst in message.bursts) {
           burst.impacts.forEach(_hit);
         }
-        message.unseenHits.forEach(_hit);
+        for (final fired in message.fired) {
+          fired.impacts.forEach(_hit);
+        }
+        for (final hit in message.unseenHits) {
+          _damage(hit.targetId, hit.damage);
+        }
         section = message.section ?? section;
         for (final hq in message.hqs) {
           hqs[hq.team] = hq;
@@ -94,13 +99,12 @@ final class ViewHolder implements SectionSubscriber {
     }
   }
 
-  void _hit(Impact impact) {
-    final unit = units[impact.targetId];
+  void _hit(Impact impact) => _damage(impact.targetId, impact.damage);
+
+  void _damage(String unitId, double damage) {
+    final unit = units[unitId];
     if (unit == null || unit.private != null) return;
-    units[impact.targetId] = _with(
-      unit,
-      hp: math.max(0, unit.hp - impact.damage),
-    );
+    units[unitId] = _with(unit, hp: math.max(0, unit.hp - damage));
   }
 
   void _world(BattleEvent event) {
