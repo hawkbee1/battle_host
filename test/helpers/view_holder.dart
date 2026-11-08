@@ -128,6 +128,7 @@ final class ViewHolder implements SectionSubscriber {
         unitId: unit.unitId,
         unitType: unit.unitType,
         sectionId: unit.sectionId,
+        team: unit.team,
         hp: hp ?? unit.hp,
         maxHp: unit.maxHp,
         position: position ?? unit.position,

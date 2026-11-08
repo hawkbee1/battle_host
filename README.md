@@ -85,6 +85,16 @@ dart compile exe bin/load_test.dart -o /tmp/load_test
   [--server-managed 0] [--wal <folder>]
 ```
 
+## Recorded streams
+
+`tool/record_streams.dart` plays the scripted battle of the tests and writes what the
+host sends each section, and its whole view at the end, to `battle_client`'s
+`test/fixtures/streams/`. Run it again when a message or the update stream changes:
+
+```sh
+dart run tool/record_streams.dart
+```
+
 ## Part of hawkbee
 
 This repository is a git submodule of the

@@ -21,6 +21,7 @@ dependencies:
   sentry: ^10.3.0
 
 dev_dependencies:
+  battle_client: ^0.1.0
   mocktail: ^1.0.5
   test: ^1.31.0
   very_good_analysis: ^11.0.0

@@ -34,6 +34,7 @@ final class SectionViews {
       unitId: unit.id,
       unitType: unit.type.id,
       sectionId: unit.sectionId,
+      team: _state.sections[unit.sectionId]!.team,
       hp: unit.health.current,
       maxHp: unit.health.max,
       position: location is OnField && cell != null
