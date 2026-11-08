@@ -66,18 +66,29 @@ void main() {
     data.path,
     '--host-id',
     'host-1',
+    '--address',
+    '127.0.0.1',
   ];
 
   group('battle_host serve', () {
     test('stack decision 1 serves its maps until it is asked to stop, and '
         'reports what Appwrite refuses', () async {
       final stop = Completer<void>();
-      final code = serve([...base(), '--poll', '1'], until: () => stop.future);
+      final code = serve([
+        ...base(),
+        '--poll',
+        '1',
+        '--port',
+        '0',
+      ], until: () => stop.future);
       await Future<void>.delayed(const Duration(milliseconds: 50));
       stop.complete();
 
       expect(await code, ExitCode.success.code);
       verify(() => logger.info('host=host-1 maps=valley starting')).called(1);
+      verify(
+        () => logger.info(any(that: startsWith('host=host-1 listening port='))),
+      ).called(1);
       verify(() => logger.info('host=host-1 stopped battles=0 failed=0'))
           .called(1);
       verify(() => logger.err(any())).called(greaterThan(1));
@@ -85,7 +96,7 @@ void main() {
 
     test('takes its ID from HOSTNAME and reports to Sentry when SENTRY_DSN '
         'is set', () async {
-      final args = base()..removeRange(8, 10);
+      final args = (base()..removeRange(8, 10))..addAll(['--port', '0']);
 
       expect(
         await serve(
@@ -108,6 +119,8 @@ void main() {
         (base()..removeRange(4, 6), _appwrite),
         (base()..removeRange(8, 10), _appwrite),
         ([...base(), '--poll', '0'], _appwrite),
+        ([...base(), '--port', 'x'], _appwrite),
+        ([...base(), '--port', '70000'], _appwrite),
         (base(), const <String, String>{}),
         (base(), {..._appwrite, 'APPWRITE_API_KEY': ''}),
       ]) {

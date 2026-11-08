@@ -40,7 +40,11 @@ final class BattleCommands implements CommandSink {
     final stamped = command.stamped(origin: origin, seq: battle.takeSeq());
     final handled = battle.orders.handle(stamped);
     record(LogEntry(at: battle.time, command: stamped, events: handled.events));
-    return handled;
+    return HandledOrder(
+      events: handled.events,
+      refusal: handled.refusal,
+      seq: stamped.seq,
+    );
   }
 }
 

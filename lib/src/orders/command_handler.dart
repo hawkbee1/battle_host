@@ -1353,16 +1353,20 @@ final class CommandHandler {
 }
 
 /// {@template handled_order}
-/// What the handler did with a command: its events, and its refusal when
-/// it was refused.
+/// What the handler did with a command: its events, its refusal when it
+/// was refused, and its sequence number once logged.
 /// {@endtemplate}
 final class HandledOrder {
   /// {@macro handled_order}
-  const new({required this.events, this.refusal});
+  const new({required this.events, this.refusal, this.seq});
 
   /// The events of the command.
   final List<BattleEvent> events;
 
   /// Why it was refused; null when it was not.
   final OrderRefusal? refusal;
+
+  /// The command's sequence number in the battle; null for a command
+  /// refused before it got one (the rate limit).
+  final int? seq;
 }

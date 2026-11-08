@@ -3,6 +3,7 @@ import 'package:battle_host/battle_host.dart';
 import 'package:hawkbee_schema/hawkbee_schema.dart';
 import 'package:test/test.dart';
 
+import '../../helpers/endpoints.dart';
 import '../../helpers/fixtures.dart';
 import 'battle_placement_test.dart';
 
@@ -68,6 +69,22 @@ void main() {
       (host.clock as ManualClock).advance(const Duration(seconds: 5));
       await service.tick();
       expect(host['b-1']!.time, const Duration(seconds: 5));
+    });
+
+    test('stack decision 3 checks its sockets after each tick', () async {
+      final endpoints = Endpoints(host: host, accounts: MemoryAccountCheck());
+      service = HostService(
+        host: host,
+        placement: service.placement,
+        endpoints: endpoints,
+      );
+      final lurker = FakeSocket();
+      endpoints.open(lurker);
+
+      (host.clock as ManualClock).advance(const Duration(minutes: 1));
+      await service.tick();
+
+      expect(endpoints.connections, isEmpty);
     });
 
     test('stack decision 2 snapshots every battle when it stops', () async {

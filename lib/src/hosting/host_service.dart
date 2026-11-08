@@ -1,5 +1,6 @@
 import 'package:battle_host/src/core/shared_map.dart';
 import 'package:battle_host/src/core/simulation_host.dart';
+import 'package:battle_host/src/endpoints/endpoints.dart';
 import 'package:battle_host/src/hosting/battle_placement.dart';
 import 'package:battle_pathfinding/battle_pathfinding.dart';
 import 'package:battle_rules/battle_rules.dart';
@@ -8,7 +9,8 @@ import 'package:battle_rules/battle_rules.dart';
 /// A host process at work (stack decision 1, hosting): its [host] is
 /// brought to the clock's time every second ([tick]), and every [poll]
 /// it runs the battles placed on it and reports those that ended
-/// ([placement]). [stop] snapshots every battle and waits for the uploads
+/// ([placement]). Its [endpoints], when it has them, check their sockets
+/// after each tick. [stop] snapshots every battle and waits for the uploads
 /// before the process ends (stack decision 2).
 /// {@endtemplate}
 final class HostService {
@@ -16,8 +18,12 @@ final class HostService {
   new({
     required this.host,
     required this.placement,
+    this.endpoints,
     this.poll = const Duration(seconds: 10),
   });
+
+  /// The endpoints of its players and AI agents.
+  final Endpoints? endpoints;
 
   /// The host process.
   final SimulationHost host;
@@ -43,6 +49,7 @@ final class HostService {
   /// One second: the battles advance; on each [poll], the placement syncs.
   Future<void> tick() async {
     host.advance();
+    await endpoints?.tick();
     _seconds++;
     if (_seconds % poll.inSeconds == 0) await _sync();
   }

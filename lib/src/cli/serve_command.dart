@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:args/command_runner.dart';
 import 'package:battle_backend/battle_backend.dart';
+import 'package:battle_host/src/adapters/appwrite_account_check.dart';
 import 'package:battle_host/src/adapters/appwrite_storage.dart';
 import 'package:battle_host/src/adapters/directory_map_source.dart';
 import 'package:battle_host/src/adapters/file_write_ahead_log.dart';
+import 'package:battle_host/src/adapters/host_server.dart';
 import 'package:battle_host/src/adapters/logger_error_reporter.dart';
 import 'package:battle_host/src/adapters/plan_files.dart';
 import 'package:battle_host/src/adapters/sentry_error_reporter.dart';
@@ -12,6 +14,7 @@ import 'package:battle_host/src/adapters/system_clock.dart';
 import 'package:battle_host/src/cli/run_command.dart';
 import 'package:battle_host/src/core/shared_map.dart';
 import 'package:battle_host/src/core/simulation_host.dart';
+import 'package:battle_host/src/endpoints/endpoints.dart';
 import 'package:battle_host/src/hosting/battle_placement.dart';
 import 'package:battle_host/src/hosting/host_service.dart';
 import 'package:dart_appwrite/dart_appwrite.dart';
@@ -24,6 +27,9 @@ import 'package:mason_logger/mason_logger.dart';
 /// (`BattlePlacement`), with their logs and snapshots in Appwrite Storage.
 /// It advances them every second until [_until] completes (the executable
 /// passes SIGTERM and SIGINT; never by default), then snapshots them.
+/// Players and AI agents reach them on `--address` and `--port`
+/// (`HostServer`): JWTs are checked with Appwrite Auth, API keys in the
+/// `bt_api_keys` table.
 ///
 /// Appwrite comes from `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID` and
 /// `APPWRITE_API_KEY`; errors go to Sentry when `SENTRY_DSN` is set.
@@ -46,6 +52,17 @@ final class ServeCommand extends Command<int> {
         help:
             'The ID of this host in the battles it runs; HOSTNAME by '
             'default.',
+      )
+      ..addOption(
+        'address',
+        defaultsTo: '0.0.0.0',
+        help: 'The address the endpoints listen on.',
+      )
+      ..addOption(
+        'port',
+        defaultsTo: '8080',
+        help:
+            'The port of the endpoints: WebSocket and HTTPS behind the proxy.',
       )
       ..addOption(
         'poll',
@@ -88,6 +105,10 @@ final class ServeCommand extends Command<int> {
     if (poll == null || poll < 1) {
       usageException('--poll takes a whole number of seconds.');
     }
+    final port = int.tryParse(args.option('port')!);
+    if (port == null || port < 0 || port > 65535) {
+      usageException('--port takes a port number.');
+    }
     final client = Client()
       ..setEndpoint(variable('APPWRITE_ENDPOINT'))
       ..setProject(variable('APPWRITE_PROJECT_ID'))
@@ -116,8 +137,20 @@ final class ServeCommand extends Command<int> {
       logs: AppwriteLogSink(storage),
       snapshots: AppwriteSnapshotStore(storage),
     );
+    final endpoints = Endpoints(
+      host: host,
+      accounts: AppwriteAccountCheck.connect(
+        endpoint: variable('APPWRITE_ENDPOINT'),
+        project: variable('APPWRITE_PROJECT_ID'),
+        keys: ApiKeys(
+          rows: AppwriteRows(TablesDB(client)),
+          admins: AppwriteAdmins(Users(client)),
+        ),
+      ),
+    );
     final service = HostService(
       host: host,
+      endpoints: endpoints,
       placement: BattlePlacement(
         rows: AppwriteRows(TablesDB(client)),
         host: host,
@@ -130,6 +163,12 @@ final class ServeCommand extends Command<int> {
 
     _logger.info('host=$hostId maps=${mapIds.join(',')} starting');
     await _guarded(service.start, reporter.report);
+    final server = await HostServer.bind(
+      endpoints,
+      address: args.option('address')!,
+      port: port,
+    );
+    _logger.info('host=$hostId listening port=${server.port}');
     var stopping = false;
     final stop = _until?.call() ?? Completer<void>().future;
     unawaited(stop.then((_) => stopping = true));
@@ -137,6 +176,7 @@ final class ServeCommand extends Command<int> {
       await Future<void>.delayed(_second);
       if (!stopping) await _guarded(service.tick, reporter.report);
     }
+    await server.close();
     await service.stop();
     await sentry?.close();
     _logger.info(

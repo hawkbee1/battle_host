@@ -18,5 +18,7 @@ COPY maps /app/maps
 # the last 10 seconds before a stop are lost (stack decision 2).
 VOLUME /data
 
+# The endpoints of players and AI agents (`serve --port`).
+EXPOSE 8080
 ENTRYPOINT ["/app/battle_host", "serve", "--plan", "/app/plan", "--maps", "/app/maps", "--data", "/data"]
 CMD ["--map", "saint_lo"]

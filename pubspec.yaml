@@ -14,6 +14,7 @@ dependencies:
   battle_pathfinding: ^0.1.0
   battle_protocol: ^0.1.0
   battle_rules: ^0.1.0
+  crypto: ^3.0.7
   dart_appwrite: ^31.1.0
   hawkbee_schema: ^0.1.0
   mason_logger: ^0.3.5
