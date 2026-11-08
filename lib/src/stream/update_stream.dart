@@ -41,7 +41,7 @@ final class _Sent {
 /// the change, its own units, and what every section knows (MAP-49). Per
 /// event type, see [_visibility]; shots no rule covers are assumed in
 /// Q-CBT-39. A moving unit's position is the one the host holds, its
-/// destination from the start of its move (Q-MAP-26). Its relic alerts
+/// destination from the start of its move (decision 236). Its relic alerts
 /// reach the previous owner team's players at once, or on their next
 /// connection (RELIC-10, decision 233, `PendingAlerts`).
 /// {@endtemplate}
