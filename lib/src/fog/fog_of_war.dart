@@ -62,7 +62,7 @@ final class _Watch {
 /// [reportingScouts].
 ///
 /// Units on the field see; carried units see from their transport but are
-/// not seen on their own (COMBAT-54; assumed in Q-MAP-25). A unit sees
+/// not seen on their own (COMBAT-54, decision 235). A unit sees
 /// another with the vision rules of M4.5 and its effective stats: range,
 /// weather, forest, height, observe (MAP-26 to MAP-35, UNIT-34).
 ///

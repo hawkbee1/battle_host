@@ -98,8 +98,8 @@ final class World implements ObstacleQuery {
   ///
   /// The line runs from [fromHeightM] above the observer's point (the top
   /// of its hit volume) to [toHeightM] above the target's; where the ground
-  /// rises above it, a hill blocks it (MAP-26, vision in 3D; assumed in
-  /// Q-MAP-25).
+  /// rises above it, a hill blocks it (MAP-26, vision in 3D; decision
+  /// 235).
   SightLine sightLine(
     CellRef from,
     CellRef to, {
