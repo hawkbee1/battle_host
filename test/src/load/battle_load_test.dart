@@ -142,6 +142,8 @@ void main() {
       );
       expect(report.tickMicros.keys, containsAll([0, 7200]));
       expect(report.hostMicros, greaterThan(0));
+      expect(report.fogMicros.keys, containsAll([0, 7200]));
+      expect(report.fogLines, greaterThan(0));
       expect(clock.now(), DateTime.utc(2026, 11, 6, 2));
     });
 

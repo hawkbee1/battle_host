@@ -192,8 +192,9 @@ enum _Goal { fire, burst, move }
 
 /// {@template load_report}
 /// What a load-test run did: the orders it sent and how the host took
-/// them, and the time the host spent ([hostMicros], each one-second tick
-/// of battle time with any work in [tickMicros]).
+/// them, the time the host spent ([hostMicros], each one-second tick of
+/// battle time with any work in [tickMicros]), and the time its fog of war
+/// took apart from that ([fogMicros], M6 Issue 3).
 /// {@endtemplate}
 final class LoadReport {
   /// {@macro load_report}
@@ -206,6 +207,8 @@ final class LoadReport {
     required this.delayed,
     required this.refused,
     required this.tickMicros,
+    required this.fogMicros,
+    required this.fogLines,
   });
 
   /// The orders sent.
@@ -234,6 +237,13 @@ final class LoadReport {
   /// work, by second, in microseconds.
   final Map<int, int> tickMicros;
 
+  /// The time the fog of war of every battle took at each tick of battle
+  /// time, by second, in microseconds.
+  final Map<int, int> fogMicros;
+
+  /// The sight lines the fog of war checked in all.
+  final int fogLines;
+
   /// The time the host spent in all, in microseconds.
   int get hostMicros => tickMicros.values.fold(0, (sum, time) => sum + time);
 }
@@ -250,7 +260,8 @@ final class LoadReport {
 ///
 /// Every order goes through [SimulationHost.submit], as a player's would.
 /// The host's time, in `submit` and `advance` only, is measured per second
-/// of battle time; the script's own choices are not.
+/// of battle time, and its fog of war's (`see`) apart; the script's own
+/// choices are not.
 /// {@endtemplate}
 final class BattleLoad {
   /// {@macro battle_load}
@@ -279,6 +290,7 @@ final class BattleLoad {
   final _due = TimerQueue<(String, String)>();
   final _goals = <(String, String), _Goal>{};
   final _ticks = <int, int>{};
+  final _fog = <int, int>{};
   var _orders = 0;
   var _shots = 0;
   var _moves = 0;
@@ -300,7 +312,10 @@ final class BattleLoad {
       if (next > end) break;
       clock.advance(_start.add(next).difference(clock.now()));
       if (next == second) {
-        _timed(next, host.advance);
+        _timed(next, () => host.advance(see: false));
+        final watch = Stopwatch()..start();
+        host.see();
+        _fog[second.inSeconds] = watch.elapsedMicroseconds;
         second += const Duration(seconds: 1);
         if (second.inSeconds % 10 == 0) {
           await Future<void>.delayed(Duration.zero);
@@ -319,6 +334,10 @@ final class BattleLoad {
       delayed: _delayed,
       refused: Map.unmodifiable(_refused),
       tickMicros: Map.unmodifiable(_ticks),
+      fogMicros: Map.unmodifiable(_fog),
+      fogLines: [
+        for (final id in battleIds) host[id]?.orders.fog.linesChecked ?? 0,
+      ].fold(0, (sum, lines) => sum + lines),
     );
   }
 

@@ -15,6 +15,10 @@ import 'package:battle_rules/battle_rules.dart';
 /// - `bench=host_load`: the host's CPU per second of battle time (mean over
 ///   the seconds with work, p50, p99, the busiest second and when), in all
 ///   and per simulated day, and the orders sent and taken;
+/// - `bench=host_fog`: the fog of war's CPU per one-second tick (the first
+///   one, which computes every set, the mean, p50, p99, p99.9, the
+///   busiest tick and the busiest after the first, and when), the sight
+///   lines it checked and its CPU per simulated day (M6 Issue 3);
 /// - `bench=host_memory`: the process's resident memory before the map,
 ///   with the map, with the battles placed, and at the end;
 /// - `bench=host_log`: the log of the first battle: entries, bytes an entry,
@@ -129,6 +133,25 @@ Future<void> main(List<String> args) async {
     'host_cpu_s=${(report.hostMicros / 1e6).toStringAsFixed(1)} '
     'host_cpu_s_per_day=${(report.hostMicros / 1e6 / days).toStringAsFixed(1)} '
     'wall_s=${(wall.elapsedMilliseconds / 1000).toStringAsFixed(1)}',
+  );
+  final fog = report.fogMicros.values.toList()..sort();
+  final fogPeak = report.fogMicros.entries.reduce(
+    (a, b) => b.value > a.value ? b : a,
+  );
+  final fogLater = report.fogMicros.entries
+      .where((tick) => tick.key > 0)
+      .reduce((a, b) => b.value > a.value ? b : a);
+  final fogTotal = fog.fold(0, (sum, time) => sum + time);
+  _print(
+    'bench=host_fog ticks=${fog.length} '
+    'first_tick_us=${report.fogMicros[0]} '
+    'mean_us=${(fogTotal / fog.length).round()} '
+    'p50_us=${fog[fog.length ~/ 2]} p99_us=${fog[fog.length * 99 ~/ 100]} '
+    'p999_us=${fog[fog.length * 999 ~/ 1000]} '
+    'max_us=${fogPeak.value} max_at_s=${fogPeak.key} '
+    'max_after_first_us=${fogLater.value} max_after_first_at_s=${fogLater.key} '
+    'lines=${report.fogLines} '
+    'cpu_s_per_day=${(fogTotal / 1e6 / days).toStringAsFixed(1)}',
   );
   _print(
     'bench=host_burst reloads=${report.reloads} '
