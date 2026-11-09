@@ -9,7 +9,9 @@
 //   dart run battle_host:battle_host serve --plan ../../apps/battle_team/plan \
 //     --maps ../battle_map/maps/built --map saint_lo_1km --data build/playtest \
 //     --host-id playtest --port 8091 --public-address http://localhost:8091
-// then, from packages/battle_host:
+// or the compose host host-saint-lo-1, which serves saint_lo_1km too (see
+// docs/battle_team/playtest.md, "With the Docker host"). Then, from
+// packages/battle_host:
 //   APPWRITE_API_KEY=<tooling key> dart run tool/playtest.dart
 //
 // It writes the blue player's sign-in and the battle to

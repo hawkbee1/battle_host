@@ -78,15 +78,16 @@ The Docker image is the AOT executable, the plan's data and the maps, on the Dar
 files (any linux/amd64 host):
 
 ```sh
-docker/prepare.sh saint_lo                       # in the hawkbee checkout
+docker/prepare.sh saint_lo saint_lo_1km          # in the hawkbee checkout
 docker build -f docker/Dockerfile -t battle_host build/docker
 APPWRITE_API_KEY=<key> docker compose -f docker/compose.yaml up -d
 ```
 
-`docker/compose.yaml` runs one container per map on the local Appwrite's network
+`docker/compose.yaml` runs one container for `saint_lo` and its 1 km playtest slice
+`saint_lo_1km` (every map it serves must be in the image) on the local Appwrite's network
 (`hermes-net`, endpoint `http://appwrite-traefik/v1`), port 8080 published as 8081; keep
 its `/data` volume. Its comments say how to reach it from the LAN and how to start a spare
-container of the same map.
+container of the same maps.
 
 ## Load test
 
