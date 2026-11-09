@@ -26,7 +26,7 @@ the plan).
   check every 30 minutes (AI-07); its `Fire` orders, like every order the server gives its
   sections, go through the command handler with the origin `server` and are logged.
 
-The Appwrite adapters use the buckets `battle_logs` and `battle_snapshots` of hawkbee's
+The Appwrite adapters use the buckets `bt_battle_logs` and `bt_battle_snapshots` of hawkbee's
 `backend/appwrite.config.json`. Their contract tests on the local Appwrite are opt-in: tag
 `appwrite`, with `APPWRITE_API_KEY` set (`dart_test.yaml`).
 
@@ -39,6 +39,76 @@ dart run battle_host run --plan <apps/battle_team/plan> --maps <built maps> --ma
 simulated days, one commander per team. Errors go to Sentry when `SENTRY_DSN` is set
 (`SENTRY_ENVIRONMENT`, `development` by default), to the error output otherwise. Maps are
 built by [battle_map](https://github.com/hawkbee1/battle_map)'s `build_map`.
+
+## Hosting
+
+```sh
+battle_host serve --plan <plan> --maps <built maps> --map <id> [--map <id>...] \
+  --data <write-ahead logs> [--host-id <id>] [--port 8080] \
+  [--public-address <url>] [--poll 10] [--lease 60]
+```
+
+`serve` is the process of one container. It prepares the path searches of its maps, then
+every `--poll` seconds runs the battles placed on it and reports those that ended
+(`BattlePlacement`, over hawkbee's `bt_battles`, `bt_sections`, `bt_wars`, `bt_guilds` and
+`bt_hosts` tables):
+
+- **Address**: it writes its `--public-address` and the time in its `bt_hosts` row. Clients
+  ask the `bt_battle_host` function for the address of their battle's host; `bt_hosts`
+  grants no client any permission. Live, the address is the host's `https://` name behind
+  the reverse proxy that ends TLS; by default it is `http://<host-id>:<port>`, its name on
+  the Docker network.
+- **Placement**: it claims each `running` battle of its maps whose row has no `host`, or
+  names a host whose `bt_hosts` row is older than `--lease`, by writing its `--host-id` (the
+  container's `HOSTNAME` by default), and runs the battles that name it: recovered from
+  their snapshot, or started from their rows. A battle it claims starts from its uploads,
+  its own write-ahead log of it discarded. A battle it runs whose row names another host
+  has moved: it stops running it, and its sockets close so that their clients look again.
+- **End**: once a battle has a winner, its row gets status `ended`, the winner and a
+  `BattleResult`, which triggers the `end_battle` function.
+
+Every battle advances each second. Players and AI agents reach the endpoints on `--port`
+(`GET /v1/socket`, `POST /v1/battles/<battle>/commands`). SIGTERM (`docker stop`)
+snapshots every battle, waits for the uploads, then lets go of the battles all uploaded
+and deletes its `bt_hosts` row, so that another container takes them at its next look.
+Appwrite comes from `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID` and `APPWRITE_API_KEY`
+(tables and storage scopes).
+
+The Docker image is the AOT executable, the plan's data and the maps, on the Dart runtime
+files (any linux/amd64 host):
+
+```sh
+docker/prepare.sh saint_lo                       # in the hawkbee checkout
+docker build -f docker/Dockerfile -t battle_host build/docker
+APPWRITE_API_KEY=<key> docker compose -f docker/compose.yaml up -d
+```
+
+`docker/compose.yaml` runs one container per map on the local Appwrite's network
+(`hermes-net`, endpoint `http://appwrite-traefik/v1`), port 8080 published as 8081; keep
+its `/data` volume. Its comments say how to reach it from the LAN and how to start a spare
+container of the same map.
+
+## Load test
+
+`bin/load_test.dart` plays a 1,000-unit battle on a real map over a simulated day through
+the host's one entry (`package:battle_host/load.dart`), and prints one machine-readable
+line for each of P-01, P-02 and P-03 of the plan's `performance-tests.md`:
+
+```sh
+dart compile exe bin/load_test.dart -o /tmp/load_test
+/tmp/load_test [--map saint_lo] [--units 1000] [--hours 24] [--battles 1] \
+  [--server-managed 0] [--wal <folder>]
+```
+
+## Recorded streams
+
+`tool/record_streams.dart` plays the scripted battle of the tests and writes what the
+host sends each section, and its whole view at the end, to `battle_client`'s
+`test/fixtures/streams/`. Run it again when a message or the update stream changes:
+
+```sh
+dart run tool/record_streams.dart
+```
 
 ## Part of hawkbee
 

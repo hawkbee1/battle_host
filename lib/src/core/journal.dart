@@ -125,6 +125,15 @@ final class Journal {
     _send(log);
   }
 
+  /// Whether every entry of [battleId] and its latest snapshot are
+  /// uploaded: another host recovers it whole from the uploads alone.
+  ///
+  /// Throws an [ArgumentError] for a battle it does not keep.
+  bool saved(String battleId) {
+    final log = _log(battleId);
+    return log.unsent.isEmpty && log.waiting == null;
+  }
+
   /// Completes once every upload and snapshot under way is done.
   Future<void> settle() async {
     while (_work.isNotEmpty) {

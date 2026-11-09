@@ -1,0 +1,76 @@
+# The simulation host next to the local Appwrite (stack decision 1,
+# hosting). One service per map: each container claims the running battles
+# of its map (`bt_battles.host` = its hostname) and runs them, and writes
+# where clients reach it in `bt_hosts` (M6 Issue 6).
+#
+#   APPWRITE_API_KEY=<key with tables and storage scopes> \
+#     docker compose -f docker/compose.yaml up -d
+#
+# The local Appwrite is on `hermes-net` (docs/project-setup.md, section 6),
+# reached as http://appwrite-traefik/v1. Live, point APPWRITE_ENDPOINT at
+# the Appwrite Cloud project, and set each host's public address to its
+# https:// name behind the reverse proxy that ends TLS.
+#
+# Clients find a host at its public address. By default it is the
+# container's name on hermes-net (factory1, agents in containers); for
+# phones and browsers on the LAN, publish the port and use the laptop's
+# address, as for the local Appwrite:
+#   HOST_SAINT_LO_ADDRESS=http://<LAN_IP>:8081 docker compose ... up -d
+#
+# The `spare` profile starts a second container of the same map. Stop the
+# first and the spare takes its battles at its next look (10 s): a planned
+# stop lets them go at once, a crash after the 60 s lease.
+#   docker compose -f docker/compose.yaml --profile spare up -d host-saint-lo-b
+name: battle_host
+
+x-host: &host
+  image: battle_host
+  environment:
+    APPWRITE_ENDPOINT: ${APPWRITE_ENDPOINT:-http://appwrite-traefik/v1}
+    APPWRITE_PROJECT_ID: ${APPWRITE_PROJECT_ID:-hawkbee}
+    APPWRITE_API_KEY: ${APPWRITE_API_KEY:?set APPWRITE_API_KEY}
+    SENTRY_DSN: ${SENTRY_DSN:-}
+    SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
+  # A stop snapshots every battle, waits for the uploads and lets its
+  # battles go.
+  stop_grace_period: 60s
+  restart: unless-stopped
+  networks:
+    - appwrite
+
+services:
+  host-saint-lo:
+    <<: *host
+    hostname: host-saint-lo
+    command:
+      - --map
+      - saint_lo
+      - --public-address
+      - ${HOST_SAINT_LO_ADDRESS:-http://host-saint-lo:8080}
+    ports:
+      - "8081:8080"
+    volumes:
+      - wal-saint-lo:/data
+
+  host-saint-lo-b:
+    <<: *host
+    profiles: [spare]
+    hostname: host-saint-lo-b
+    command:
+      - --map
+      - saint_lo
+      - --public-address
+      - ${HOST_SAINT_LO_B_ADDRESS:-http://host-saint-lo-b:8080}
+    ports:
+      - "8082:8080"
+    volumes:
+      - wal-saint-lo-b:/data
+
+volumes:
+  wal-saint-lo:
+  wal-saint-lo-b:
+
+networks:
+  appwrite:
+    name: ${APPWRITE_NETWORK:-hermes-net}
+    external: true

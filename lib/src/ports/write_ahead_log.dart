@@ -20,6 +20,11 @@ abstract interface class WriteAheadLog {
   /// The entries held for [battleId]: none, from 0, for a battle it never
   /// held.
   HeldEntries read(String battleId);
+
+  /// Forgets what it holds for [battleId]: a battle this host claims, which
+  /// another host may have run since its own entries were written (M6
+  /// Issue 6). The battle's uploaded log is its history from then on.
+  void discard(String battleId);
 }
 
 /// {@template memory_write_ahead_log}
@@ -49,4 +54,7 @@ final class MemoryWriteAheadLog implements WriteAheadLog {
     final (from, entries) = _held[battleId] ?? (0, const <LogEntry>[]);
     return (from: from, entries: List.unmodifiable(entries));
   }
+
+  @override
+  void discard(String battleId) => _held.remove(battleId);
 }

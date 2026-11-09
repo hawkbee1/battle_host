@@ -188,17 +188,25 @@ final class Rewards implements BattleListener {
   }
 
   /// ECO-13: a section that lost a unit and owns none left besides its
-  /// commander gets `max(money, minStartingMoney)`.
+  /// commander gets `max(money, minStartingMoney)`. One pass over the
+  /// units finds the sections that lost one (P-02, M5 Issue 19).
   void _safetyNet(BattleState before) {
+    if (identical(before.units, _state.units)) return;
+    final losers = <String>{};
+    for (final unit in before.units.values) {
+      if (_state.units[unit.id]?.sectionId != unit.sectionId) {
+        losers.add(unit.sectionId);
+      }
+    }
+    if (losers.isEmpty) return;
     for (final section in _state.sections.values) {
-      bool own(UnitState unit) => unit.sectionId == section.id;
-      final lost = before.units.values.any((unit) {
-        final now = _state.units[unit.id];
-        return own(unit) && (now == null || !own(now));
-      });
-      if (!lost) continue;
+      if (!losers.contains(section.id)) continue;
       final left = _state.units.values
-          .where((unit) => own(unit) && unit.type.category != commanderCategory)
+          .where(
+            (unit) =>
+                unit.sectionId == section.id &&
+                unit.type.category != commanderCategory,
+          )
           .length;
       battle.change(
         (state) => state.withSection(
@@ -237,18 +245,26 @@ final class StorageLocks implements BattleListener {
   @override
   List<BattleEvent> hear(List<BattleEvent> events, BattleState before) {
     final state = battle.state;
+    final fielded = {
+      for (final unit in before.units.values)
+        if (unit.onField && unit.type.storable) unit.sectionId,
+    };
+    if (fielded.isEmpty) return const [];
+    final units = <String, List<(UnitType, UnitLocation)>>{};
+    for (final unit in state.units.values) {
+      if (fielded.contains(unit.sectionId)) {
+        (units[unit.sectionId] ??= []).add((unit.type, unit.location));
+      }
+    }
     final locked = <BattleEvent>[];
     for (final section in state.sections.values) {
-      if (state.teams[section.team]!.eliminated) continue;
-      bool onField(UnitState unit) =>
-          unit.sectionId == section.id && unit.onField && unit.type.storable;
-      if (!before.units.values.any(onField)) continue;
+      if (!fielded.contains(section.id) ||
+          state.teams[section.team]!.eliminated) {
+        continue;
+      }
       final until = _storage.lockAfter(
         at: battle.time,
-        units: [
-          for (final unit in state.units.values)
-            if (unit.sectionId == section.id) (unit.type, unit.location),
-        ],
+        units: units[section.id] ?? const [],
         byCommanderDeath: _commanderDied(events, before, section.id),
       );
       if (until == null) continue;

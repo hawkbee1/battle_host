@@ -204,6 +204,22 @@ void writeAheadLogContract(WriteAheadLog Function() make) {
     expectHeld(wal.read('b-1'), from: 4, entries: entries.sublist(4));
   });
 
+  test('forgets a battle it discards, and holds it again from any '
+      'position', () {
+    final entries = sampleEntries(6);
+    wal
+      ..append('b-1', 0, entries[0])
+      ..append('b-1', 1, entries[1])
+      ..append('b-2', 0, entries[0])
+      ..discard('b-1')
+      ..discard('b-3');
+
+    expectHeld(wal.read('b-1'), from: 0, entries: const []);
+    expectHeld(wal.read('b-2'), from: 0, entries: entries.sublist(0, 1));
+    wal.append('b-1', 1, entries[1]);
+    expectHeld(wal.read('b-1'), from: 1, entries: entries.sublist(1, 2));
+  });
+
   test('refuses a position it already holds', () {
     wal.append('b-1', 0, sampleEntries(1).single);
 

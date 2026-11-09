@@ -14,6 +14,7 @@ import 'package:battle_host/src/ports/error_reporter.dart';
 import 'package:battle_host/src/ports/log_sink.dart';
 import 'package:battle_host/src/ports/snapshot_store.dart';
 import 'package:battle_host/src/ports/write_ahead_log.dart';
+import 'package:battle_host/src/stream/update_stream.dart';
 import 'package:battle_protocol/battle_protocol.dart';
 import 'package:battle_rules/battle_rules.dart';
 
@@ -76,6 +77,7 @@ final class SimulationHost {
   );
 
   final _commands = <String, CommandSink>{};
+  final _streams = <String, UpdateStream>{};
 
   final _battles = <String, Battle>{};
   final _startedAt = <String, DateTime>{};
@@ -140,6 +142,7 @@ final class SimulationHost {
     } on Object {
       _battles.remove(battle.id);
       _commands.remove(battle.id);
+      _streams.remove(battle.id);
       _journal.close(battle.id);
       rethrow;
     }
@@ -183,7 +186,12 @@ final class SimulationHost {
     final unsent = held.entries.sublist(
       (uploadedTo - held.from).clamp(0, held.entries.length),
     );
-    replay(battle, [...uploaded, ...unsent], from: snapshot.position);
+    final replayed = [...uploaded, ...unsent];
+    replay(battle, replayed, from: snapshot.position);
+    // The alerts of the replayed entries: nobody is connected yet.
+    for (final entry in replayed) {
+      battle.alerts.hear(entry, battle.state);
+    }
     _checkFree(battleId);
     _failed.remove(battleId);
     _run(battle, startedAt: startedAt);
@@ -219,23 +227,61 @@ final class SimulationHost {
     final commands =
         _commands[battleId] ??
         (throw StateError('battle $battleId failed while it caught up'));
+    final HandledOrder handled;
     try {
-      return commands.submit(command, origin: origin);
+      handled = commands.submit(command, origin: origin);
     } on Object catch (error, stackTrace) {
       _fail(battleId, error, stackTrace);
       rethrow;
     }
+    if (handled.refusal == null) _streams[battleId]?.flush();
+    return handled;
   }
 
-  /// Brings every battle to the clock's time, then uploads the log batches
-  /// and takes the snapshots due (stack decision 2). A battle that fails
-  /// is reported and stopped; the others go on.
-  void advance() {
+  /// Subscribes [subscriber] to the section [sectionId] of the battle
+  /// [battleId]: it gets the section's whole view, the alerts its player
+  /// has not received, then its updates after each tick and each accepted
+  /// order (M6 Issue 4).
+  ///
+  /// Throws an [ArgumentError] for a battle that does not run or a section
+  /// not in it.
+  void subscribe(
+    String battleId,
+    String sectionId,
+    SectionSubscriber subscriber,
+  ) => _streamOf(battleId).subscribe(sectionId, subscriber);
+
+  /// Stops sending the battle [battleId] to [subscriber].
+  void unsubscribe(String battleId, SectionSubscriber subscriber) =>
+      _streams[battleId]?.unsubscribe(subscriber);
+
+  UpdateStream _streamOf(String battleId) =>
+      _streams[battleId] ??
+      (throw ArgumentError.value(battleId, 'battleId', 'does not run'));
+
+  /// The host's tick: brings every battle to the clock's time, then uploads
+  /// the log batches and takes the snapshots due (stack decision 2), then,
+  /// when [see], brings every battle's fog of war up to date ([see]). A
+  /// battle that fails is reported and stopped; the others go on.
+  void advance({bool see = true}) {
     final now = clock.now();
     for (final MapEntry(key: id, value: battle) in _battles.entries.toList()) {
       _advance(id, battle, now);
     }
     _journal.tick(now);
+    if (see) this.see();
+  }
+
+  /// Brings every battle's visible sets to its state, then sends each
+  /// subscribed section what changed for it: once per tick (M6 Issues 3
+  /// and 4). A battle that fails is reported and stopped.
+  void see() {
+    for (final MapEntry(key: id, value: battle) in _battles.entries.toList()) {
+      _guard(id, () {
+        battle.orders.fog.sync();
+        _streams[id]!.flush();
+      });
+    }
   }
 
   /// Takes a snapshot of the battle [battleId] now: before a planned stop,
@@ -248,6 +294,25 @@ final class SimulationHost {
   /// the process stops.
   Future<void> settle() => _journal.settle();
 
+  /// Whether every entry of the battle [battleId] and its latest snapshot
+  /// are uploaded, so that another host recovers it whole (M6 Issue 6).
+  ///
+  /// Throws an [ArgumentError] for a battle that does not run.
+  bool saved(String battleId) => _journal.saved(battleId);
+
+  /// Stops running the battle [battleId], without failing it: another
+  /// host runs it now (M6 Issue 6). What waits for upload stays in the
+  /// write-ahead log only, and nothing more of it is uploaded from here.
+  /// Its subscribers get nothing more; the endpoints close their sockets
+  /// at their next tick, and their clients find its new host.
+  void release(String battleId) {
+    _battles.remove(battleId);
+    _startedAt.remove(battleId);
+    _commands.remove(battleId);
+    _streams.remove(battleId);
+    _journal.close(battleId);
+  }
+
   void _checkFree(String battleId) {
     if (_battles.containsKey(battleId)) {
       throw ArgumentError.value(battleId, 'battleId', 'already runs');
@@ -257,16 +322,26 @@ final class SimulationHost {
   void _run(Battle battle, {required DateTime startedAt}) {
     _battles[battle.id] = battle;
     _startedAt[battle.id] = startedAt;
+    final stream = _streams[battle.id] = UpdateStream(battle);
     _commands[battle.id] = RateLimitedCommands(
-      inner: BattleCommands(battle: battle, journal: _journal),
+      inner: BattleCommands(
+        battle: battle,
+        record: (entry) {
+          _journal.append(battle.id, entry);
+          stream.hear(entry);
+        },
+      ),
       limit: rateLimit,
       clock: clock,
     );
   }
 
-  void _advance(String id, Battle battle, DateTime now) {
+  void _advance(String id, Battle battle, DateTime now) =>
+      _guard(id, () => battle.advanceTo(now.difference(_startedAt[id]!)));
+
+  void _guard(String id, void Function() work) {
     try {
-      battle.advanceTo(now.difference(_startedAt[id]!));
+      work();
     } on Object catch (error, stackTrace) {
       _fail(id, error, stackTrace);
     }
@@ -275,6 +350,7 @@ final class SimulationHost {
   void _fail(String id, Object error, StackTrace stackTrace) {
     _battles.remove(id);
     _commands.remove(id);
+    _streams.remove(id);
     _journal.close(id);
     _failed.add(id);
     unawaited(reporter.report(error, stackTrace, battleId: id));

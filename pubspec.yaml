@@ -9,15 +9,19 @@ environment:
 
 dependencies:
   args: ^2.7.0
+  battle_backend: ^0.1.0
   battle_map: ^0.1.0
   battle_pathfinding: ^0.1.0
   battle_protocol: ^0.1.0
   battle_rules: ^0.1.0
+  crypto: ^3.0.7
   dart_appwrite: ^31.1.0
+  hawkbee_schema: ^0.1.0
   mason_logger: ^0.3.5
   sentry: ^10.3.0
 
 dev_dependencies:
+  battle_client: ^0.1.0
   mocktail: ^1.0.5
   test: ^1.31.0
   very_good_analysis: ^11.0.0

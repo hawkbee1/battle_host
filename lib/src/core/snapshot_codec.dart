@@ -44,6 +44,18 @@ Uint8List encodeSnapshot(
         {'at': at.inMicroseconds, ..._timer(timer)},
     ],
     'state': _state(memento.state),
+    if (memento.alerts.isNotEmpty)
+      'alerts': {
+        for (final MapEntry(:key, :value) in memento.alerts.entries)
+          key: [
+            for (final alert in value)
+              {
+                'at': alert.at.inMicroseconds,
+                'relic': alert.relicId,
+                'team': alert.team,
+              },
+          ],
+      },
   }),
 );
 
@@ -84,6 +96,18 @@ DecodedSnapshot decodeSnapshot(
           (timer.time('at'), decoder.timer(timer)),
       ],
       state: decoder.state(root.item('state')),
+      alerts: {
+        if (root.maybeItem('alerts') case final alerts?)
+          for (final account in alerts.json.keys)
+            account: [
+              for (final alert in alerts.items(account))
+                wire.RelicAlert(
+                  at: alert.time('at'),
+                  relicId: alert.text('relic'),
+                  team: alert.text('team'),
+                ),
+            ],
+      },
     ),
     startedAt: DateTime.fromMicrosecondsSinceEpoch(
       root.integer('startedAt'),

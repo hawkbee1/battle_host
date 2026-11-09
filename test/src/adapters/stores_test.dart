@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:battle_host/battle_host.dart';
 import 'package:battle_protocol/battle_protocol.dart';
 import 'package:dart_appwrite/dart_appwrite.dart';
+import 'package:hawkbee_schema/hawkbee_schema.dart';
 import 'package:test/test.dart';
 
 import '../../helpers/stores.dart';
@@ -41,7 +42,8 @@ void main() {
       await AppwriteLogSink(fake.storage)
           .upload(LogBatch(battleId: 'b-1', from: 42, entries: entries));
 
-      final data = fake.files['$battleLogsBucket/b-1-000000000042']!;
+      final data =
+          fake.files['${AppwriteIds.battleLogsBucketId}/b-1-000000000042']!;
       expect(decodeBatch(data), equals(entries));
       expect(
         data.length,
@@ -63,7 +65,8 @@ void main() {
     });
 
     test('stops reading at a batch with no entry', () async {
-      fake.files['$battleLogsBucket/b-1-000000000000'] = encodeBatch(const []);
+      fake.files['${AppwriteIds.battleLogsBucketId}/b-1-000000000000'] =
+          encodeBatch(const []);
 
       expect(await AppwriteLogSink(fake.storage).read('b-1'), isEmpty);
     });
@@ -100,8 +103,8 @@ void main() {
       }
 
       expect(fake.files.keys, {
-        '$battleSnapshotsBucket/b-1-s0',
-        '$battleSnapshotsBucket/b-1-s1',
+        '${AppwriteIds.battleSnapshotsBucketId}/b-1-s0',
+        '${AppwriteIds.battleSnapshotsBucketId}/b-1-s1',
       });
       final restarted = AppwriteSnapshotStore(fake.storage);
       expect((await restarted.latest('b-1'))!.position, 4);
@@ -116,9 +119,8 @@ void main() {
         [0x42, 0x54, 0x53, 0x4E, 0x80],
         [0x42, 0x54, 0x53, 0x4E, 3],
       ]) {
-        fake.files['$battleSnapshotsBucket/b-1-s0'] = Uint8List.fromList(
-          gzip.encode(bytes),
-        );
+        fake.files['${AppwriteIds.battleSnapshotsBucketId}/b-1-s0'] =
+            Uint8List.fromList(gzip.encode(bytes));
 
         await expectLater(
           AppwriteSnapshotStore(fake.storage).latest('b-1'),

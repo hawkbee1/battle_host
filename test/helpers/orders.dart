@@ -12,56 +12,60 @@ import 'fixtures.dart';
 /// of most types; team 2 (`s-2` of `a-2`, no money) has a commander and two
 /// soldiers.
 /// `soldier-4`, `soldier-5` and the guild camp `camp-1` stay in storage.
-/// The server runs `s-2` when [serverManaged] (AI-06).
-BattleSetup ordersSetup({int seed = 11, bool serverManaged = false}) =>
-    BattleSetup(
-      battleId: 'b-1',
-      mapId: 'valley',
-      seed: seed,
-      settings: planData.battle,
-      teams: [
-        const TeamSetup(
-          id: 'team-1',
-          sections: [
-            SectionSetup(
-              id: 's-1',
-              accountId: 'a-1',
-              money: 1000,
-              units: [
-                UnitSetup(id: 'commander-1', type: 'commander'),
-                UnitSetup(id: 'soldier-1', type: 'soldier'),
-                UnitSetup(id: 'medic-1', type: 'medic'),
-                UnitSetup(id: 'engineer-1', type: 'engineer'),
-                UnitSetup(id: 'scout-1', type: 'scout'),
-                UnitSetup(id: 'artillery-1', type: 'artillery'),
-                UnitSetup(id: 'radio-1', type: 'radio'),
-                UnitSetup(id: 'truck-1', type: 'truck'),
-                UnitSetup(id: 'helicopter-1', type: 'helicopter'),
-                UnitSetup(id: 'jeep-1', type: 'jeep'),
-                UnitSetup(id: 'soldier-4', type: 'soldier'),
-                UnitSetup(id: 'soldier-5', type: 'soldier'),
-                UnitSetup(id: 'camp-1', type: 'encampment'),
-              ],
-            ),
-          ],
-        ),
-        TeamSetup(
-          id: 'team-2',
-          sections: [
-            SectionSetup(
-              id: 's-2',
-              accountId: 'a-2',
-              serverManaged: serverManaged,
-              units: const [
-                UnitSetup(id: 'commander-2', type: 'commander'),
-                UnitSetup(id: 'soldier-2', type: 'soldier'),
-                UnitSetup(id: 'soldier-3', type: 'soldier'),
-              ],
-            ),
+/// The server runs `s-2` when [serverManaged] (AI-06); [accountTwo] holds
+/// `s-2`.
+BattleSetup ordersSetup({
+  int seed = 11,
+  bool serverManaged = false,
+  String accountTwo = 'a-2',
+}) => BattleSetup(
+  battleId: 'b-1',
+  mapId: 'valley',
+  seed: seed,
+  settings: planData.battle,
+  teams: [
+    const TeamSetup(
+      id: 'team-1',
+      sections: [
+        SectionSetup(
+          id: 's-1',
+          accountId: 'a-1',
+          money: 1000,
+          units: [
+            UnitSetup(id: 'commander-1', type: 'commander'),
+            UnitSetup(id: 'soldier-1', type: 'soldier'),
+            UnitSetup(id: 'medic-1', type: 'medic'),
+            UnitSetup(id: 'engineer-1', type: 'engineer'),
+            UnitSetup(id: 'scout-1', type: 'scout'),
+            UnitSetup(id: 'artillery-1', type: 'artillery'),
+            UnitSetup(id: 'radio-1', type: 'radio'),
+            UnitSetup(id: 'truck-1', type: 'truck'),
+            UnitSetup(id: 'helicopter-1', type: 'helicopter'),
+            UnitSetup(id: 'jeep-1', type: 'jeep'),
+            UnitSetup(id: 'soldier-4', type: 'soldier'),
+            UnitSetup(id: 'soldier-5', type: 'soldier'),
+            UnitSetup(id: 'camp-1', type: 'encampment'),
           ],
         ),
       ],
-    );
+    ),
+    TeamSetup(
+      id: 'team-2',
+      sections: [
+        SectionSetup(
+          id: 's-2',
+          accountId: accountTwo,
+          serverManaged: serverManaged,
+          units: const [
+            UnitSetup(id: 'commander-2', type: 'commander'),
+            UnitSetup(id: 'soldier-2', type: 'soldier'),
+            UnitSetup(id: 'soldier-3', type: 'soldier'),
+          ],
+        ),
+      ],
+    ),
+  ],
+);
 
 /// Where each unit stands on the field (the storage orders come in M5.12).
 const ordersPlaces = {

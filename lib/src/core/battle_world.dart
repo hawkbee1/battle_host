@@ -110,11 +110,22 @@ final class BattleWorld {
     ), () => GroundSearch.on(grid, cost: shared.cost, mover: mover));
   }
 
+  final _touched = <CellRef>{};
+
+  /// The cells the changes touched since the last call: the sight lines
+  /// across them are checked again (M6 Issue 3).
+  Set<CellRef> takeTouched() {
+    final touched = Set.of(_touched);
+    _touched.clear();
+    return touched;
+  }
+
   /// Applies [change]: the paths forget only the steps it touches, and the
   /// battle's own grid, copied from the shared one on the first change,
   /// reloads only the cells it touches (P-07).
   void apply(WorldChange change) {
     final touched = paths.apply(change);
+    _touched.addAll(touched);
     (_grid ??= GroundGrid.copy(shared.grid)).apply(paths.map, touched);
   }
 }
