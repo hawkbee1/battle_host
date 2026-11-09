@@ -1,7 +1,11 @@
 # The simulation host next to the local Appwrite (stack decision 1,
-# hosting). One service per map: each container claims the running battles
-# of its map (`bt_battles.host` = its hostname) and runs them, and writes
-# where clients reach it in `bt_hosts` (M6 Issue 6).
+# hosting). One service per group of maps: each container claims the running
+# battles of its maps (`bt_battles.host` = its hostname) and runs them, and
+# writes where clients reach it in `bt_hosts` (M6 Issue 6). Besides the full
+# map saint_lo, this host serves its 1 km slice saint_lo_1km, the map of the
+# playtest (docs/battle_team/playtest.md). Every map served must be in the
+# image: `docker/prepare.sh saint_lo saint_lo_1km`, then `docker build`, and
+# a host started on an image without one of its maps does not start.
 #
 #   APPWRITE_API_KEY=<key with tables and storage scopes> \
 #     docker compose -f docker/compose.yaml up -d
@@ -45,6 +49,8 @@ services:
     command:
       - --map
       - saint_lo
+      - --map
+      - saint_lo_1km
       - --public-address
       - ${HOST_SAINT_LO_ADDRESS:-http://host-saint-lo:8080}
     ports:
@@ -59,6 +65,8 @@ services:
     command:
       - --map
       - saint_lo
+      - --map
+      - saint_lo_1km
       - --public-address
       - ${HOST_SAINT_LO_B_ADDRESS:-http://host-saint-lo-b:8080}
     ports:
