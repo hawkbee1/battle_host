@@ -18,6 +18,7 @@ Future<MemoryRows> warRows({
   String mapId = 'valley',
   String? host,
   Map<String, int> tree = const {'hp': 2},
+  Map<String, Object?> settings = const {},
 }) async {
   final rows = MemoryRows();
   await rows.put(
@@ -77,6 +78,7 @@ Future<MemoryRows> warRows({
       warId: 'w-1',
       mapId: mapId,
       seed: 3,
+      settings: settings,
       status: BattleStatus.running,
       host: host,
       teams: const {
@@ -239,6 +241,65 @@ void main() {
 
       expect(second['b-1']!.state.units.keys, first['b-1']!.state.units.keys);
     });
+
+    test('COMBAT-02 decision 238 plays a battle with the settings its row '
+        'overrides, and the plan for the rest', () async {
+      final rows = await warRows(
+        settings: {
+          'ap': {'recovery_delay_s': 1},
+          'test_units': true,
+        },
+      );
+      final host = hostOn();
+
+      await placementOf(rows, host).sync();
+
+      final battle = host['b-1']!;
+      expect(battle.settings.ap.recoveryDelayS, 1);
+      expect(battle.settings.testUnits, isTrue);
+      expect(battle.settings.ap.max, planData.battle.ap.max);
+      expect(battle.state.units['c-1']!.pool.recoveryDelayS, 1);
+      expect(battle.state.teams['team-1']!.hq.pool.recoveryDelayS, 1);
+    });
+
+    test('COMBAT-02 a battle recovered from its snapshot keeps its own '
+        'settings', () async {
+      final rows = await warRows(
+        settings: {
+          'ap': {'recovery_delay_s': 1},
+          'test_units': true,
+        },
+      );
+      final snapshots = MemorySnapshotStore();
+      final logs = MemoryLogSink();
+      final wal = MemoryWriteAheadLog();
+      final first = hostOn(snapshots: snapshots, logs: logs, wal: wal);
+      await placementOf(rows, first).sync();
+      await first.settle();
+      final second = hostOn(snapshots: snapshots, logs: logs, wal: wal);
+
+      expect(await placementOf(rows, second).sync(), ['b-1']);
+
+      final battle = second['b-1']!;
+      expect(battle.settings.ap.recoveryDelayS, 1);
+      expect(battle.settings.testUnits, isTrue);
+      expect(battle.state.units['c-1']!.pool.recoveryDelayS, 1);
+    });
+
+    test(
+      'reports a battle whose row holds settings the plan refuses',
+      () async {
+        final rows = await warRows(
+          settings: {
+            'ap': {'recovery_delay_s': 0},
+          },
+        );
+
+        expect(await placementOf(rows, hostOn()).sync(), isEmpty);
+        expect(reporter.reports.single.$1, isA<GameDataException>());
+        expect(reporter.reports.single.$2, 'b-1');
+      },
+    );
 
     test('reports a battle that fails to start and tries again', () async {
       final rows = await warRows(tree: const {'wings': 1});

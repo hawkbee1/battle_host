@@ -113,7 +113,7 @@ void main() {
       final data = readPlan(planPath);
 
       expect(data.units.unitTypes, contains('commander'));
-      expect(data.battle.ap.recoveryPerHour, equals(1));
+      expect(data.battle.ap.recoveryDelayS, equals(3600));
     });
   });
 }

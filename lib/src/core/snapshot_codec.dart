@@ -11,7 +11,7 @@ import 'package:battle_rules/battle_rules.dart';
 
 /// The version of the snapshot format. A snapshot of another version is
 /// not read: a host restores only the snapshots of its own version.
-const snapshotVersion = 1;
+const snapshotVersion = 2;
 
 /// A battle restored from its snapshot's data: what the battle holds, and
 /// the wall time it started at.
@@ -77,7 +77,9 @@ DecodedSnapshot decodeSnapshot(
   final root = _Reader(json, r'$');
   final version = root.integer('v');
   if (version != snapshotVersion) {
-    throw FormatException('not a battle snapshot of version 1: $version');
+    throw FormatException(
+      'not a battle snapshot of version $snapshotVersion: $version',
+    );
   }
   final decoder = _Decoder(definitions);
   return (
@@ -373,7 +375,7 @@ _Json _victory(VictoryState victory) => {
 
 _Json _pool(ApPool pool) => {
   'max': pool.max,
-  'recoveryPerHour': pool.recoveryPerHour,
+  'recoveryDelayS': pool.recoveryDelayS,
   'value': pool.value,
   'at': pool.updatedAt.inMicroseconds,
 };
@@ -712,7 +714,7 @@ final class _Decoder {
 
   static ApPool _pool(_Reader pool) => ApPool(
     max: pool.number('max'),
-    recoveryPerHour: pool.number('recoveryPerHour'),
+    recoveryDelayS: pool.integer('recoveryDelayS'),
     value: pool.number('value'),
     updatedAt: pool.time('at'),
   );

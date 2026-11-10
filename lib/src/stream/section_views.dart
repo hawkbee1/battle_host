@@ -72,7 +72,7 @@ final class SectionViews {
   ApView _ap(ApPool pool) => ApView(
     value: pool.value,
     at: pool.updatedAt,
-    perHour: pool.recoveryPerHour,
+    perHour: Duration.secondsPerHour / pool.recoveryDelayS,
     max: pool.max,
   );
 

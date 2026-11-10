@@ -303,7 +303,7 @@ void main() {
               .firstWhere((unit) => unit['id'] == id);
 
       final cases = <String, void Function(Map<String, Object?>)>{
-        'another version': (json) => json['v'] = 2,
+        'another version': (json) => json['v'] = snapshotVersion + 1,
         'a value of the wrong kind': (json) => json['battle'] = 5,
         'an unknown timer': (json) =>
             at(json, ['timers', 0])['kind'] = 'meteor',

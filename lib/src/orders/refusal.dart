@@ -244,6 +244,10 @@ enum HostRule {
   /// The battle has no unit type, weapon type or stat of that name.
   unknownType,
 
+  /// The test unit is bought only in a battle whose settings allow test
+  /// units (UNIT-44, decision 239).
+  testUnitsOff,
+
   /// The battle has no such section.
   unknownSection,
 

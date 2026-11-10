@@ -203,10 +203,14 @@ final class SectionOrders {
 
   // Purchases (ECO-04 to ECO-07, HQ-42, HQ-46, COMBAT-27).
 
-  /// [section] buys a unit of [typeId] as `unit-[seq]` (ECO-04, ECO-05).
+  /// [section] buys a unit of [typeId] as `unit-[seq]` (ECO-04, ECO-05). The
+  /// test unit is sold only where the battle allows it (UNIT-44).
   OrderPlan buyUnit(SectionState section, String typeId, int seq) {
     final type = battle.definitions.units.unitTypes[typeId];
     if (type == null) return refused(HostRule.unknownType);
+    if (type.id == testUnitId && !battle.settings.testUnits) {
+      return refused(HostRule.testUnitsOff);
+    }
     return _buy(section, type, seq);
   }
 
@@ -252,7 +256,7 @@ final class SectionOrders {
             location: const Deployed(),
             pool: ApPool.full(
               max: type.stats.apMax,
-              recoveryPerHour: battle.settings.ap.recoveryPerHour,
+              recoveryDelayS: battle.settings.ap.recoveryDelayS,
               at: _now,
             ),
             health: Health.full(type.stats.hp),

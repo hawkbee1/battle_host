@@ -389,6 +389,53 @@ void main() {
       expect(refusalOf(const BuyUnit(unitType: 'dragon')), 'unknown_type');
     });
 
+    test('UNIT-44 buying test_unit is refused without test_units', () {
+      rebuild('s-1', xp: 1000000000);
+      final units = f.battle.state.units.length;
+
+      expect(refusalOf(const BuyUnit(unitType: 'test_unit')), 'test_units_off');
+      expect(section('s-1').money, equals(1000));
+      expect(f.battle.state.units, hasLength(units));
+    });
+
+    test('UNIT-44 buying test_unit is accepted with test_units, for nothing: '
+        'the unit holds 10,000 AP', () {
+      f = OrdersFixture(settings: planData.settingsWith({'test_units': true}));
+      rebuild('s-1', xp: 1000000000);
+      final seq = f.entries.length + 1;
+
+      final bought = eventsOf(const BuyUnit(unitType: 'test_unit')).first;
+
+      expect(
+        bought,
+        UnitPurchased(
+          sectionId: 's-1',
+          unitId: 'unit-$seq',
+          unitType: 'test_unit',
+          price: 0,
+        ),
+      );
+      expect(section('s-1').money, equals(1000));
+      final pool = f.battle.state.units['unit-$seq']!.pool;
+      expect((pool.max, pool.value), (10000, 10000));
+    });
+
+    test('COMBAT-02 a unit bought in a battle with its own delay recovers '
+        'at it', () {
+      f = OrdersFixture(
+        settings: planData.settingsWith({
+          'ap': {'recovery_delay_s': 1},
+        }),
+      );
+      rebuild('s-1', xp: 1000000000);
+      final seq = f.entries.length + 1;
+
+      eventsOf(const BuyUnit(unitType: 'soldier'));
+
+      expect(f.battle.state.units['unit-$seq']!.pool.recoveryDelayS, 1);
+      expect(f.battle.state.units['soldier-1']!.pool.recoveryDelayS, 1);
+    });
+
     test('HQ-46 decision 205 a blocked arrival or a locked section buys '
         'nothing', () {
       rebuild('s-1', xp: 1000000000);

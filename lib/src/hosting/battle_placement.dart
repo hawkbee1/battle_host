@@ -187,9 +187,10 @@ final class BattlePlacement {
   /// The setup of the running battle [row]: its teams in the order of its
   /// row, each section as its row keeps it (UNIT-30), its guild role
   /// (SOC-50), and the money floor of its war (SOC-10). Its settings are
-  /// `battle.yaml`'s (decision 172).
+  /// `battle.yaml`'s, except those its row overrides (decisions 172, 238).
   ///
-  /// Throws a [StateError] for a war, section or guild with no row, and a
+  /// Throws a [StateError] for a war, section or guild with no row, a
+  /// [GameDataException] for settings the plan refuses, and a
   /// [FormatException] for a tree step of no evolvable stat.
   Future<BattleSetup> setupOf(BattleRow row) async {
     final war = WarRow.fromData(
@@ -200,7 +201,7 @@ final class BattlePlacement {
       battleId: row.id,
       mapId: row.mapId,
       seed: row.seed,
-      settings: host.definitions.battle,
+      settings: host.definitions.settingsWith(row.settings),
       minStartingMoney: war.minStartingMoney,
       teams: [
         for (final MapEntry(key: team, value: ids) in row.teams.entries)

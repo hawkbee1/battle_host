@@ -5,6 +5,12 @@
 // would, through the host's socket. The battle_team app then opens straight
 // into it as blue (`lib/main_playtest.dart`).
 //
+// The battle is a testing battle (M7.2): `--fast`, on by default, gives it
+// `test_units` and a recovery delay of 1 s (AP come back every second, so a
+// soldier moves continuously), and blue's opening buys a test unit (10,000
+// AP, every action, price 0). `--no-fast` plays the rules as written: one AP
+// an hour, no test unit.
+//
 // Needs a host serving the map, for example in factory1:
 //   dart run battle_host:battle_host serve --plan ../../apps/battle_team/plan \
 //     --maps ../battle_map/maps/built --map saint_lo_1km --data build/playtest \
@@ -12,7 +18,7 @@
 // or the compose host host-saint-lo-1, which serves saint_lo_1km too (see
 // docs/battle_team/playtest.md, "With the Docker host"). Then, from
 // packages/battle_host:
-//   APPWRITE_API_KEY=<tooling key> dart run tool/playtest.dart
+//   APPWRITE_API_KEY=<tooling key> dart run tool/playtest.dart [--no-fast]
 //
 // It writes the blue player's sign-in and the battle to
 // apps/battle_team/env/playtest.json (not committed). Each run starts a new
@@ -33,12 +39,20 @@ import 'package:hawkbee_schema/hawkbee_schema.dart';
 
 const _map = 'saint_lo_1km';
 const _envFile = '../../apps/battle_team/env/playtest.json';
+
+/// The settings of a fast playtest battle (decisions 238, 239): a testing
+/// battle with a 1 s recovery delay.
+const _fastSettings = <String, Object?>{
+  'ap': {'recovery_delay_s': 1},
+  'test_units': true,
+};
 const _players = {
   'blue': ('bt-blue', 'blue@battleteam.local', 'Blue'),
   'red': ('bt-red', 'red@battleteam.local', 'Red'),
 };
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
+  final fast = !args.contains('--no-fast');
   final environment = Platform.environment;
   final endpoint =
       environment['APPWRITE_ENDPOINT'] ?? 'http://appwrite-traefik/v1';
@@ -113,6 +127,7 @@ Future<void> main() async {
     battleId: battleId,
     mapId: _map,
     seed: random.nextInt(1 << 31),
+    settings: fast ? _fastSettings : const {},
   );
   final started = await wars.start(caller: 'playtest', battleId: battleId);
   await rows.put(
@@ -127,7 +142,10 @@ Future<void> main() async {
         )
         .toData(),
   );
-  print('started the battle $battleId on $_map: blue against red');
+  print(
+    'started the battle $battleId on $_map: blue against red'
+    '${fast ? ' (fast: 1 s recovery delay, test units)' : ''}',
+  );
 
   // Blue's opening, once a host runs the battle.
   stdout.write('waiting for a host to claim it');
@@ -151,6 +169,7 @@ Future<void> main() async {
   stdout.writeln();
   await _open(
     battleId: battleId,
+    testUnit: fast,
     finder: client.AppwriteHostFinder(
       endpoint: Uri.parse(endpoint),
       project: project,
@@ -170,10 +189,12 @@ Future<void> main() async {
   print('wrote $_envFile');
 }
 
-/// Blue buys four soldiers and a scout with its starting money, then
-/// deploys every unit it holds in the HQ.
+/// Blue buys four soldiers and a scout with its starting money, and a test
+/// unit when the battle allows it ([testUnit]), then deploys every unit it
+/// holds in the HQ.
 Future<void> _open({
   required String battleId,
+  required bool testUnit,
   required client.AppwriteHostFinder finder,
   required Future<String> Function() jwt,
 }) async {
@@ -192,12 +213,19 @@ Future<void> _open({
   await signedIn.timeout(const Duration(seconds: 30));
   Future<void> send(Order order) async {
     final answer = await blue.send(order).timeout(const Duration(seconds: 10));
-    print(
-      '  ${order.runtimeType}: ${answer.accepted ? 'accepted' : answer.refusal}',
-    );
+    final result = answer.accepted ? 'accepted' : answer.refusal;
+    print('  ${order.runtimeType}: $result');
   }
 
-  for (final type in ['soldier', 'soldier', 'soldier', 'soldier', 'scout']) {
+  final types = [
+    'soldier',
+    'soldier',
+    'soldier',
+    'soldier',
+    'scout',
+    if (testUnit) 'test_unit',
+  ];
+  for (final type in types) {
     await send(BuyUnit(unitType: type));
   }
   final stored = [

@@ -70,7 +70,7 @@ void main() {
       for (final unit in battle.state.units.values) {
         expect(unit.location, isA<Stored>());
         expect(unit.pool.value, equals(unit.type.stats.apMax));
-        expect(unit.pool.recoveryPerHour, equals(1));
+        expect(unit.pool.recoveryDelayS, equals(3600));
         expect(unit.health.current, equals(unit.type.stats.hp));
         expect(unit.morale, equals(planData.combat.morale.base));
       }
@@ -135,13 +135,13 @@ void main() {
       final settings = BattleSettings.parse(
         File('$planPath/data/battle.yaml')
             .readAsStringSync()
-            .replaceFirst('recovery_per_hour: 1', 'recovery_per_hour: 4'),
+            .replaceFirst('recovery_delay_s: 3600', 'recovery_delay_s: 900'),
       );
       final battle = start(valleySetup(settings: settings));
 
       expect(battle.settings, same(settings));
-      expect(battle.state.units['soldier-1']!.pool.recoveryPerHour, equals(4));
-      expect(planData.battle.ap.recoveryPerHour, equals(1));
+      expect(battle.state.units['soldier-1']!.pool.recoveryDelayS, equals(900));
+      expect(planData.battle.ap.recoveryDelayS, equals(3600));
     });
 
     test('refuses settings the definitions refuse', () {
@@ -258,7 +258,7 @@ void main() {
               unit.copyWith(
                 pool: ApPool(
                   max: unit.pool.max,
-                  recoveryPerHour: unit.pool.recoveryPerHour,
+                  recoveryDelayS: unit.pool.recoveryDelayS,
                   value: 0,
                   updatedAt: Duration.zero,
                 ),

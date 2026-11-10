@@ -408,8 +408,8 @@ final class BattleLoad {
       _ => 0.0,
     };
     if (ap < need) {
-      final hours = (need - ap) / battle.settings.ap.recoveryPerHour;
-      _due.schedule(now + _seconds(hours * 3600 + 1), key);
+      final seconds = (need - ap) * battle.settings.ap.recoveryDelayS;
+      _due.schedule(now + _seconds(seconds + 1), key);
       return;
     }
     if (order == null) {
