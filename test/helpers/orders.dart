@@ -18,11 +18,12 @@ BattleSetup ordersSetup({
   int seed = 11,
   bool serverManaged = false,
   String accountTwo = 'a-2',
+  BattleSettings? settings,
 }) => BattleSetup(
   battleId: 'b-1',
   mapId: 'valley',
   seed: seed,
-  settings: planData.battle,
+  settings: settings ?? planData.battle,
   teams: [
     const TeamSetup(
       id: 'team-1',
@@ -99,8 +100,14 @@ void deploy(Battle battle) => battle.change((state) {
 /// `a-1` has logged in, so he manages team 1's HQ (HQ-07).
 final class OrdersFixture {
   /// A fixture whose senders may send [rateLimit] orders, with the random
-  /// of [seed]; the server runs `s-2` when [serverManaged].
-  new({RateLimit? rateLimit, this.seed = 11, this.serverManaged = false}) {
+  /// of [seed]; the server runs `s-2` when [serverManaged]. The battle plays
+  /// with [settings], else with the plan's.
+  new({
+    RateLimit? rateLimit,
+    this.seed = 11,
+    this.serverManaged = false,
+    BattleSettings? settings,
+  }) {
     host = SimulationHost(
       clock: clock,
       maps: MapLibrary(
@@ -112,7 +119,9 @@ final class OrdersFixture {
       wal: wal,
       rateLimit: rateLimit ?? RateLimit(perSecond: 1000, burst: 1000),
     );
-    battle = host.start(ordersSetup(seed: seed, serverManaged: serverManaged));
+    battle = host.start(
+      ordersSetup(seed: seed, serverManaged: serverManaged, settings: settings),
+    );
     deploy(battle);
     send(const EnterBattle(), origin: Origin.server);
   }
@@ -167,7 +176,7 @@ final class OrdersFixture {
     (unit) => unit.copyWith(
       pool: ApPool(
         max: unit.pool.max,
-        recoveryPerHour: unit.pool.recoveryPerHour,
+        recoveryDelayS: unit.pool.recoveryDelayS,
         value: 0,
         updatedAt: battle.time,
       ),

@@ -34,7 +34,7 @@ void main() {
               unit.copyWith(
                 pool: ApPool(
                   max: unit.pool.max,
-                  recoveryPerHour: unit.pool.recoveryPerHour,
+                  recoveryDelayS: unit.pool.recoveryDelayS,
                   value: 2,
                   updatedAt: Duration.zero,
                 ),

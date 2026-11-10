@@ -22,6 +22,27 @@ void main() {
         ..place('soldier-2', const CellRef(56, 6));
     });
 
+    test('COMBAT-02 the AP view of a unit carries the rate of its recovery '
+        'delay, per hour', () {
+      final views = SectionViews(f.battle);
+      final unit = f.battle.state.units['soldier-1']!;
+      final fast = unit.copyWith(
+        pool: ApPool(
+          max: unit.pool.max,
+          recoveryDelayS: 1,
+          value: unit.pool.value,
+          updatedAt: unit.pool.updatedAt,
+        ),
+      );
+
+      final slow = views.unit(unit, unit.sectionId).private!.ap;
+      final quick = views.unit(fast, unit.sectionId).private!.ap;
+
+      expect(slow.perHour, 1);
+      expect(quick.perHour, 3600);
+      expect((quick.value, quick.max), (slow.value, slow.max));
+    });
+
     test('MAP-08 a late joiner gets the whole delta layer: the craters, the '
         'structures built, the objects damaged and destroyed, as one present '
         'from the start built it from the events', () {

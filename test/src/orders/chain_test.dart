@@ -164,7 +164,7 @@ void main() {
         (unit) => unit.copyWith(
           pool: ApPool(
             max: 5,
-            recoveryPerHour: 1,
+            recoveryDelayS: 3600,
             value: 5,
             updatedAt: Duration.zero,
           ),

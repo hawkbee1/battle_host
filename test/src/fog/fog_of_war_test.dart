@@ -225,7 +225,7 @@ void main() {
             (unit) => unit.copyWith(
               pool: ApPool.full(
                 max: unit.pool.max,
-                recoveryPerHour: unit.pool.recoveryPerHour,
+                recoveryDelayS: unit.pool.recoveryDelayS,
                 at: f.battle.time,
               ),
             ),

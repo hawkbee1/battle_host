@@ -653,7 +653,7 @@ void main() {
               morale: 0,
               pool: ApPool(
                 max: 30,
-                recoveryPerHour: 1,
+                recoveryDelayS: 3600,
                 value: 0,
                 updatedAt: Duration.zero,
               ),

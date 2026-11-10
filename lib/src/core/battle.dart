@@ -226,7 +226,7 @@ final class Battle {
           health: Health.full(settings.hq.hp),
           pool: ApPool.full(
             max: settings.hq.apMax,
-            recoveryPerHour: settings.ap.recoveryPerHour,
+            recoveryDelayS: settings.ap.recoveryDelayS,
             at: Duration.zero,
           ),
         ),
