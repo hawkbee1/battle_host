@@ -12,6 +12,7 @@ final class ViewHolder implements SectionSubscriber {
   final hqs = <String, HqView>{};
   final relics = <String, RelicView>{};
   SectionPrivate? section;
+  Roster? roster;
   (String, Duration)? hold;
   final craters = <(int, int, double, double)>[];
   final built = <String, String>{};
@@ -68,6 +69,8 @@ final class ViewHolder implements SectionSubscriber {
         for (final relic in message.relics) {
           relics[relic.relicId] = relic;
         }
+      case Roster():
+        roster = message;
       case SignInAccepted() ||
           SignInRefused() ||
           CommandAccepted() ||

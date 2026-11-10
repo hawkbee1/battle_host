@@ -216,6 +216,25 @@ void main() {
         expect(alerts(threeAgain), isEmpty);
       });
 
+      test('ECO-04 M7.7 a subscriber gets the roster right after its whole '
+          'view, again each time it subscribes, and before the alerts', () {
+        capture();
+        final holder = ViewHolder();
+
+        f.host.subscribe('f-1', 's-3', holder);
+
+        expect(holder.received[0], isA<SectionView>());
+        expect(holder.received[1], isA<Roster>());
+        expect(holder.received[2], isA<RelicAlert>());
+        expect(holder.roster, SectionViews(f.battle).roster());
+
+        final again = ViewHolder();
+        f.host
+          ..unsubscribe('f-1', holder)
+          ..subscribe('f-1', 's-3', again);
+        expect(again.received[1], equals(holder.roster));
+      });
+
       test('decision 233 the alerts not received yet survive a restart, from '
           'the snapshot or from the log after it', () async {
         f.host.snapshot('f-1');

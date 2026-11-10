@@ -389,6 +389,30 @@ void main() {
       expect(refusalOf(const BuyUnit(unitType: 'dragon')), 'unknown_type');
     });
 
+    test('ECO-04 COMBAT-27 M7.7 everything on the roster is a purchase the '
+        'host takes up: none is unknown, off, or not for sale', () {
+      f = OrdersFixture(settings: planData.settingsWith({'test_units': true}));
+      rebuild('s-1', xp: 1000000000, money: 100000);
+      final roster = SectionViews(f.battle).roster();
+      const notOnSale = {'unknown_type', 'test_units_off', 'not_for_sale'};
+
+      expect(roster.units.map((u) => u.unitType), contains('test_unit'));
+      for (final unit in roster.units) {
+        expect(
+          refusalOf(BuyUnit(unitType: unit.unitType)),
+          isNot(isIn(notOnSale)),
+          reason: unit.unitType,
+        );
+      }
+      for (final weapon in roster.weapons) {
+        expect(
+          refusalOf(BuyWeapon(weapon: weapon.weapon)),
+          isNull,
+          reason: weapon.weapon,
+        );
+      }
+    });
+
     test('UNIT-44 buying test_unit is refused without test_units', () {
       rebuild('s-1', xp: 1000000000);
       final units = f.battle.state.units.length;

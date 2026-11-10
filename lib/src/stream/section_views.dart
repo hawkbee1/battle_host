@@ -1,6 +1,8 @@
 import 'package:battle_host/src/core/battle.dart';
 import 'package:battle_host/src/core/battle_state.dart';
 import 'package:battle_host/src/fog/fog_of_war.dart';
+import 'package:battle_host/src/orders/section_orders.dart'
+    show commanderCategory, encampmentCategory;
 import 'package:battle_map/battle_map.dart' show MapObject;
 import 'package:battle_pathfinding/battle_pathfinding.dart' as nav;
 import 'package:battle_protocol/battle_protocol.dart';
@@ -205,4 +207,33 @@ final class SectionViews {
     hold: hold,
     world: world,
   );
+
+  /// What the battle lets a section buy (ECO-04, ECO-05, COMBAT-27): the
+  /// unit types a commander buys, at their price, and the weapons, at
+  /// theirs. The commander comes with his section (UNIT-41), the guild camp
+  /// is the guild chief's own order (ECO-06) and the test unit is on sale
+  /// only where the battle allows test units (UNIT-44): the same list as
+  /// the purchase orders accept, whatever the section.
+  Roster roster() {
+    final definitions = battle.definitions;
+    final prices = definitions.economy;
+    return Roster(
+      units: [
+        for (final type in definitions.units.unitTypes.values)
+          if (type.category != commanderCategory &&
+              type.category != encampmentCategory &&
+              (type.id != testUnitId || battle.settings.testUnits))
+            RosterUnit(
+              unitType: type.id,
+              category: type.category,
+              price: prices.priceOf(type.id),
+              weapons: type.weapons.allowed,
+            ),
+      ],
+      weapons: [
+        for (final weapon in definitions.combat.weaponTypes.keys)
+          RosterWeapon(weapon: weapon, price: prices.priceOf(weapon)),
+      ],
+    );
+  }
 }
