@@ -9,6 +9,7 @@ import 'package:battle_rules/battle_rules.dart';
 import 'package:test/test.dart';
 
 import '../../helpers/fixtures.dart';
+import '../../helpers/orders.dart';
 import '../../helpers/plain.dart';
 import '../../helpers/view_holder.dart';
 
@@ -41,6 +42,99 @@ void main() {
       expect(slow.perHour, 1);
       expect(quick.perHour, 3600);
       expect((quick.value, quick.max), (slow.value, slow.max));
+    });
+
+    group('roster', () {
+      test('ECO-04 ECO-05 lists what a commander buys at the prices of '
+          'economy.yaml, in the order of units.yaml: no commander, no guild '
+          'camp', () {
+        final roster = SectionViews(f.battle).roster();
+
+        expect(roster.units.map((unit) => unit.unitType), [
+          'soldier',
+          'engineer',
+          'scout',
+          'medic',
+          'artillery',
+          'radio',
+          'jeep',
+          'tank',
+          'truck',
+          'helicopter',
+          'boat',
+        ]);
+        for (final unit in roster.units) {
+          expect(unit.price, planData.economy.priceOf(unit.unitType));
+          expect(
+            unit.category,
+            planData.units.unitTypes[unit.unitType]!.category,
+          );
+        }
+        final radio = roster.units.singleWhere((u) => u.unitType == 'radio');
+        expect(radio.category, 'radio');
+        expect(radio.weapons, isEmpty);
+      });
+
+      test('COMBAT-26 each unit type lists the weapons it may equip', () {
+        final roster = SectionViews(f.battle).roster();
+
+        expect(
+          roster.units.singleWhere((u) => u.unitType == 'soldier').weapons,
+          ['rifle', 'machine_gun', 'anti_tank', 'anti_air'],
+        );
+        expect(
+          roster.units.singleWhere((u) => u.unitType == 'engineer').weapons,
+          ['rifle', 'explosive'],
+        );
+      });
+
+      test('COMBAT-27 lists every weapon type at its price', () {
+        final roster = SectionViews(f.battle).roster();
+
+        expect(
+          roster.weapons.map((weapon) => weapon.weapon),
+          planData.combat.weaponTypes.keys,
+        );
+        for (final weapon in roster.weapons) {
+          expect(weapon.price, planData.economy.priceOf(weapon.weapon));
+        }
+      });
+
+      test('UNIT-44 the test unit is listed only where the battle allows '
+          'test units, at 0 w€', () {
+        final without = SectionViews(f.battle).roster();
+        final allowed = OrdersFixture(
+          settings: planData.settingsWith({'test_units': true}),
+        );
+        final with_ = SectionViews(allowed.battle).roster();
+
+        expect(
+          without.units.map((u) => u.unitType),
+          isNot(contains('test_unit')),
+        );
+        final test = with_.units.singleWhere((u) => u.unitType == 'test_unit');
+        expect((test.price, test.category), (0, 'soldier'));
+        expect(
+          with_.units.map((u) => u.unitType).where((t) => t != 'test_unit'),
+          without.units.map((u) => u.unitType),
+        );
+      });
+
+      test('decision 237 the roster is the same for every section: it holds '
+          'nothing of any unit or section', () {
+        final views = SectionViews(f.battle);
+
+        expect(views.roster(), equals(views.roster()));
+        final text = const JsonProtocolCodec().encodeHostMessage(
+          views.roster(),
+        );
+        for (final id in f.battle.state.units.keys) {
+          expect(text, isNot(contains(id)));
+        }
+        for (final id in f.battle.state.sections.keys) {
+          expect(text, isNot(contains(id)));
+        }
+      });
     });
 
     test('MAP-08 a late joiner gets the whole delta layer: the craters, the '

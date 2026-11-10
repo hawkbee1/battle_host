@@ -69,7 +69,8 @@ final class UpdateStream {
   };
 
   /// Subscribes [subscriber] to [sectionId]: it gets the section's whole
-  /// view at once, then the alerts its player has not received yet, then
+  /// view at once, then what the battle lets it buy (`Roster`), then the
+  /// alerts its player has not received yet, then
   /// its updates.
   ///
   /// Throws an [ArgumentError] for a section not in the battle.
@@ -95,7 +96,9 @@ final class UpdateStream {
     for (final relic in view.relics) {
       sent.relics[relic.relicId] = relic;
     }
-    subscriber.send(view);
+    subscriber
+      ..send(view)
+      ..send(views.roster());
     battle.alerts.take(section.accountId).forEach(subscriber.send);
   }
 

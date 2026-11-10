@@ -450,19 +450,21 @@ void main() {
       expect(socket.closes, equals([CloseCode.normal]));
     });
 
-    test('a resync request gets the whole view again', () async {
+    test('a resync request gets the whole view again, and the roster after '
+        'it', () async {
       final (connection, socket) = await connect(frameOf(_jwt('jwt-2')));
 
       final again = await say(connection, socket, const ResyncRequest());
 
-      expect(again, equals([socket.messages[1]]));
+      expect(socket.messages[2], isA<Roster>());
+      expect(again, equals([socket.messages[1], socket.messages[2]]));
     });
 
     test('a slow client is dropped past its queue bound, and catches up '
         'with its whole view when it comes back', () async {
       endpoints = endpointsOn(
         f.host,
-        settings: const EndpointSettings(queueBound: 200),
+        settings: EndpointSettings(queueBound: _queueBound(f)),
       );
       final (connection, socket) = await connect(frameOf(_jwt('jwt-2')));
       final held = socket.held = Completer<void>();
@@ -486,16 +488,17 @@ void main() {
     });
 
     test('a lone message is never too large for the queue', () async {
+      final bound = _queueBound(f);
       endpoints = endpointsOn(
         f.host,
-        settings: const EndpointSettings(queueBound: 200),
+        settings: EndpointSettings(queueBound: bound),
       );
 
       final (connection, socket) = await connect(frameOf(_jwt('jwt-2')));
 
       expect(connection.stage, equals(ConnectionStage.signedIn));
       expect(socket.messages[1], isA<SectionView>());
-      expect((socket.frames[1] as Uint8List).length, greaterThan(200));
+      expect((socket.frames[1] as Uint8List).length, greaterThan(bound));
     });
 
     test('a socket whose writes fail is forgotten', () async {
@@ -788,3 +791,11 @@ final class _SlowAccounts implements AccountCheck {
   @override
   Future<String?> apiKey(String key) => answer.future;
 }
+
+/// A queue bound that holds the roster the battle of [f] sends after a whole
+/// view, and the small update behind it, but not the whole view itself.
+int _queueBound(OrdersFixture f) =>
+    const BinaryProtocolCodec()
+        .encodeHostMessage(SectionViews(f.battle).roster())
+        .length +
+    200;
