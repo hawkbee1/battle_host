@@ -25,6 +25,7 @@ final class _Sent {
   final hqViews = <String, HqView>{};
   final relics = <String, RelicView>{};
   SectionPrivate? section;
+  String weather = '';
 }
 
 /// {@template update_stream}
@@ -85,7 +86,8 @@ final class UpdateStream {
     _subscribers[subscriber] = sent
       ..units = {...sight.units}
       ..hqs = {...sight.hqs}
-      ..section = view.section;
+      ..section = view.section
+      ..weather = view.weather;
     for (final unit in view.units) {
       sent.positions[unit.unitId] = unit.position;
       if (unit.private != null) sent.own[unit.unitId] = unit;
@@ -196,6 +198,7 @@ final class UpdateStream {
     ];
     final update = TickUpdate(
       at: battle.time,
+      weather: state.weather == sent.weather ? null : state.weather,
       moved: moved,
       appeared: appeared,
       gone: gone,
@@ -212,7 +215,8 @@ final class UpdateStream {
     sent
       ..units = {...sight.units}
       ..hqs = {...sight.hqs}
-      ..section = section;
+      ..section = section
+      ..weather = state.weather;
     for (final hq in hqs) {
       sent.hqViews[hq.team] = hq;
     }

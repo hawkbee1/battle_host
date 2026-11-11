@@ -54,6 +54,7 @@ final class SectionViews {
                 Prisoner() => UnitPlace.prisoner,
               },
               ap: _ap(unit.pool),
+              sightRangeM: _sightRangeM(unit),
               morale: unit.morale,
               rounds: unit.weapon.rounds,
               xpEarned: unit.xp.earned,
@@ -67,6 +68,15 @@ final class SectionViews {
             ),
     );
   }
+
+  /// How far [unit] sees before weather, terrain and height: the vision
+  /// range of its type, which its skills already evolved (UNIT-18), plus the
+  /// observe bonus while it observes (UNIT-34). What the fog computes with
+  /// (`FogOfWar`), so that its section's client lights the same ground
+  /// (M7 Issue 9, MAP-31).
+  double _sightRangeM(UnitState unit) =>
+      unit.type.stats.visionRange +
+      (unit.observation?.bonusAt(battle.time) ?? 0);
 
   Duration? _after(Duration? time) =>
       time != null && time > battle.time ? time : null;
@@ -197,6 +207,7 @@ final class SectionViews {
   /// The whole view of [sectionId] with what it knows ([sight]).
   SectionView whole(String sectionId, SectionSight sight) => SectionView(
     at: battle.time,
+    weather: _state.weather,
     section: section(sectionId),
     units: [
       for (final id in sight.units)

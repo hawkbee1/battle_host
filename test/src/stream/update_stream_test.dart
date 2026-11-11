@@ -154,6 +154,65 @@ void main() {
       });
     }
 
+    group('what the client lights the ground with (M7 Issue 9)', () {
+      late FogFixture f;
+      late UpdateStream stream;
+      late ViewHolder holder;
+
+      UnitPrivate privateOf(String id) => holder.units[id]!.private!;
+
+      setUp(() {
+        f = FogFixture()
+          ..place('scout-1', const CellRef(10, 10))
+          ..place('soldier-2', const CellRef(14, 10));
+        stream = UpdateStream(f.battle);
+        holder = ViewHolder();
+        stream.subscribe('s-1', holder);
+      });
+
+      test('MAP-27 an own unit comes with how far it sees, the '
+          'vision range of its type, and a unit seen with nothing of it '
+          '(decision 237)', () {
+        final range = f.battle.definitions.units.unitTypes['scout']!;
+
+        expect(privateOf('scout-1').sightRangeM, range.stats.visionRange);
+        expect(holder.units['soldier-2']!.private, isNull);
+      });
+
+      test('MAP-27 UNIT-34 the observe bonus is in the range while the scout '
+          'observes, and out of it afterwards', () {
+        final role = f.battle.definitions.units.unitTypes['scout']!;
+        final base = role.stats.visionRange;
+        final observe = role.role.observe!;
+
+        f.send(const Observe(unitId: 'scout-1'));
+        stream.flush();
+        expect(privateOf('scout-1').sightRangeM, base + observe.visionBonusM);
+
+        f.wait(Duration(seconds: observe.durationS.ceil() + 1));
+        stream.flush();
+        expect(privateOf('scout-1').sightRangeM, base);
+      });
+
+      test('MAP-31 the weather comes with the whole view, and a change '
+          'reaches the section once', () {
+        expect(holder.weather, f.battle.state.weather);
+
+        f.weather('fog');
+        stream
+          ..flush()
+          ..flush();
+
+        expect(holder.weather, 'fog');
+        expect(
+          holder.received.whereType<TickUpdate>().where(
+            (update) => update.weather != null,
+          ),
+          hasLength(1),
+        );
+      });
+    });
+
     group('relic alerts', () {
       late FogFixture f;
 
