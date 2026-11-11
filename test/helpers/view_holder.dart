@@ -12,6 +12,7 @@ final class ViewHolder implements SectionSubscriber {
   final hqs = <String, HqView>{};
   final relics = <String, RelicView>{};
   SectionPrivate? section;
+  String? weather;
   Roster? roster;
   (String, Duration)? hold;
   final craters = <(int, int, double, double)>[];
@@ -34,6 +35,7 @@ final class ViewHolder implements SectionSubscriber {
           ..clear()
           ..addEntries(message.relics.map((r) => MapEntry(r.relicId, r)));
         section = message.section;
+        weather = message.weather;
         hold = switch (message.hold) {
           final hold? => (hold.team, hold.winsAt),
           null => null,
@@ -62,6 +64,7 @@ final class ViewHolder implements SectionSubscriber {
           _damage(hit.targetId, hit.damage);
         }
         section = message.section ?? section;
+        weather = message.weather ?? weather;
         for (final hq in message.hqs) {
           hqs[hq.team] = hq;
         }
@@ -146,6 +149,7 @@ final class ViewHolder implements SectionSubscriber {
     {for (final MapEntry(:key, :value) in hqs.entries) key: value},
     {for (final MapEntry(:key, :value) in relics.entries) key: value},
     section,
+    weather,
     hold,
     craters.toList(),
     {...built},
