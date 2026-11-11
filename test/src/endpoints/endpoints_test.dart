@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:battle_host/battle_host.dart';
@@ -143,6 +144,50 @@ void main() {
         expect(connection.stage, equals(ConnectionStage.closed));
       }
       expect(endpoints.connections, isEmpty);
+    });
+
+    test('SOC-30 a newcomer admitted while the battle runs is refused until '
+        'the host knows its section, then signs in and gets its whole '
+        'view', () async {
+      accounts = MemoryAccountCheck(
+        jwts: const {'jwt-2': 'a-2', 'jwt-3': 'a-3'},
+      );
+      endpoints = endpointsOn(f.host);
+      final (_, other) = await connect(frameOf(_jwt('jwt-2')));
+      final (_, early) = await connect(frameOf(_jwt('jwt-3')));
+      expect(
+        early.messages,
+        equals([const SignInRefused(SignInRefusal.noSection)]),
+      );
+      final heard = other.frames.length;
+
+      f.send(
+        const AdmitSection(
+          team: 'team-2',
+          money: 500,
+          units: [AdmittedUnit(unitId: 's-3-commander', unitType: 'commander')],
+        ),
+        section: 's-3',
+        account: 'a-3',
+        origin: Origin.server,
+      );
+      await pumpEventQueue();
+      final (connection, socket) = await connect(frameOf(_jwt('jwt-3')));
+
+      expect(
+        socket.messages.first,
+        isA<SignInAccepted>()
+            .having((accepted) => accepted.sectionId, 'section', 's-3')
+            .having((accepted) => accepted.team, 'team', 'team-2'),
+      );
+      expect(connection.seat!.sectionId, 's-3');
+      final view = socket.messages.whereType<SectionView>().single;
+      expect(view.units.map((unit) => unit.unitId), contains('s-3-commander'));
+      // Decision 237: the section of the same team heard nothing of it, and
+      // the newcomer is in storage, which nobody sees.
+      for (final frame in other.frames.skip(heard)) {
+        expect(latin1.decode(frame as Uint8List), isNot(contains('s-3')));
+      }
     });
 
     test('an unknown protocol version gets a goodbye, in the encoding it '

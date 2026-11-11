@@ -1,4 +1,5 @@
 import 'package:battle_host/src/core/battle.dart';
+import 'package:battle_host/src/core/battle_setup.dart';
 import 'package:battle_host/src/core/battle_state.dart';
 import 'package:battle_host/src/fog/fog_of_war.dart';
 import 'package:battle_host/src/orders/order_chain.dart';
@@ -180,6 +181,7 @@ final class CommandHandler {
       Push(:final relicId, :final path) => _push(context.unit!, relicId, path),
       MoveHq(:final to, :final path) => _moveHq(context.section!, to, path),
       EnterBattle() => _enter(context.section!),
+      final AdmitSection admission => _admit(command.sender, admission),
       Store() => sections.store(context.unit!, recall: false),
       Recall() => sections.store(context.unit!, recall: true),
       Deploy() => sections.deploy(context.unit!),
@@ -440,6 +442,48 @@ final class CommandHandler {
 
   // The HQ manager (HQ-07, decisions 220, 227): a player who logs in is
   // compared with the holder of the role by rank, not with a delegate.
+
+  /// The server admits the sender's section, a newcomer's, to the running
+  /// battle (SOC-30): it joins the team the backend drew for it (SOC-02) with
+  /// its money and its units in storage (HQ-03, UNIT-31). The events are the
+  /// ones a section has at the start of a battle (`SectionJoined`).
+  OrderPlan _admit(Sender sender, AdmitSection admission) {
+    final known = battle.definitions.units.unitTypes;
+    final ids = <String>{};
+    for (final unit in admission.units) {
+      if (!known.containsKey(unit.unitType)) {
+        return refused(HostRule.unknownType);
+      }
+      if (_state.units.containsKey(unit.unitId) || !ids.add(unit.unitId)) {
+        return refused(HostRule.unitExists);
+      }
+    }
+    return PlanReady(() {
+      battle.admit(
+        SectionSetup(
+          id: sender.sectionId,
+          accountId: sender.accountId,
+          money: admission.money,
+          units: [
+            for (final unit in admission.units)
+              UnitSetup(id: unit.unitId, type: unit.unitType),
+          ],
+        ),
+        team: admission.team,
+      );
+      return [
+        SectionJoined(
+          sectionId: sender.sectionId,
+          accountId: sender.accountId,
+          team: admission.team,
+          units: [
+            for (final unit in admission.units)
+              JoinedUnit(unitId: unit.unitId, unitType: unit.unitType),
+          ],
+        ),
+      ];
+    });
+  }
 
   OrderPlan _enter(SectionState section) {
     final team = _state.teams[section.team]!;

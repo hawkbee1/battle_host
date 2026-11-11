@@ -78,7 +78,9 @@ abstract interface class OrderCheck {
 
 /// {@template sender_check}
 /// The first link: the sender's section exists, is the sender account's,
-/// and its team is still in the battle.
+/// and its team is still in the battle. For the admission of a newcomer's
+/// section (SOC-30) it is the other way round: the section and its account
+/// are not in the battle yet, and the team to join is.
 /// {@endtemplate}
 final class SenderCheck implements OrderCheck {
   /// {@macro sender_check}
@@ -90,6 +92,9 @@ final class SenderCheck implements OrderCheck {
       return const SenderRefused(SenderProblem.battleOver);
     }
     final sender = context.command.sender;
+    if (context.command.order case AdmitSection(:final team)) {
+      return _admission(context.state, sender, team);
+    }
     final section = context.state.sections[sender.sectionId];
     if (section == null) {
       return const SenderRefused(SenderProblem.unknownSection);
@@ -103,12 +108,38 @@ final class SenderCheck implements OrderCheck {
     context.section = section;
     return null;
   }
+
+  /// A newcomer's section is not in the battle yet (SOC-30, SOC-45), and the
+  /// team it joins is.
+  static OrderRefusal? _admission(
+    BattleState state,
+    Sender sender,
+    String team,
+  ) {
+    if (state.sections.containsKey(sender.sectionId)) {
+      return const SenderRefused(SenderProblem.sectionExists);
+    }
+    if (state.sections.values.any(
+      (section) => section.accountId == sender.accountId,
+    )) {
+      return const SenderRefused(SenderProblem.accountSeated);
+    }
+    final joined = state.teams[team];
+    if (joined == null) {
+      return const SenderRefused(SenderProblem.unknownTeam);
+    }
+    if (joined.eliminated) {
+      return const SenderRefused(SenderProblem.teamEliminated);
+    }
+    return null;
+  }
 }
 
 /// {@template right_check}
 /// The second link: a unit order is for a unit of the sender's section on
 /// the field (AI-01); the HQ moves on its manager's orders only (HQ-09,
-/// HQ-10); only the server tells that a player logs in (decision 220).
+/// HQ-10); only the server tells that a player logs in (decision 220) and
+/// admits a newcomer's section (SOC-30).
 /// {@endtemplate}
 final class RightCheck implements OrderCheck {
   /// {@macro right_check}
@@ -116,6 +147,12 @@ final class RightCheck implements OrderCheck {
 
   @override
   OrderRefusal? check(OrderCheckContext context) {
+    // The section of an admission is not in the battle yet.
+    if (context.command.order is AdmitSection) {
+      return context.command.origin == Origin.server
+          ? null
+          : const RightRefused(RightProblem.notServer);
+    }
     final section = context.section!;
     switch (context.command.order) {
       case UnitOrder(:final unitId):
