@@ -70,6 +70,16 @@ enum SenderProblem {
 
   /// The battle has ended.
   battleOver,
+
+  /// The section to admit is in the battle already (SOC-30).
+  sectionExists,
+
+  /// The account to admit has a section in the battle already (SOC-45: one
+  /// section per war).
+  accountSeated,
+
+  /// The team to admit the section to is not in the battle.
+  unknownTeam,
 }
 
 /// {@template sender_refused}
@@ -104,7 +114,8 @@ enum RightProblem {
   /// Only the HQ manager moves the HQ (HQ-09, HQ-10).
   notManager,
 
-  /// Only the server tells that a player logs in (decision 220).
+  /// Only the server tells that a player logs in (decision 220) and admits
+  /// a newcomer's section (SOC-30).
   notServer,
 }
 
@@ -243,6 +254,9 @@ enum HostRule {
 
   /// The battle has no unit type, weapon type or stat of that name.
   unknownType,
+
+  /// A unit to admit is in the battle already, or twice in the admission.
+  unitExists,
 
   /// The test unit is bought only in a battle whose settings allow test
   /// units (UNIT-44, decision 239).

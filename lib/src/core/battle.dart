@@ -233,52 +233,15 @@ final class Battle {
       );
       for (final section in team.sections) {
         _unique(sections, section.id, 'section');
-        sections[section.id] = SectionState(
-          id: section.id,
-          accountId: section.accountId,
-          team: team.id,
-          money: section.money,
-          xp: section.xp,
-          medals: section.medals,
-          guildId: section.guildId,
-          guildChief: section.guildChief,
-          serverManaged: section.serverManaged,
-          storedWeapons: StoredWeapons(List.unmodifiable(section.weapons)),
-        );
-        for (final weapon in section.weapons) {
-          if (!definitions.combat.weaponTypes.containsKey(weapon)) {
-            throw ArgumentError.value(weapon, 'weapons', 'no such weapon');
-          }
-        }
+        sections[section.id] = _sectionState(section, team.id, definitions);
         for (final unit in section.units) {
           _unique(units, unit.id, 'unit');
-          final base =
-              definitions.units.unitTypes[unit.type] ??
-              (throw ArgumentError.value(unit.type, 'type', 'no such unit'));
-          final tree = unit.tree ?? SkillTree();
-          final type = evolution.evolve(base, tree);
-          final start = war.atBattleStart(type);
-          final weapon = unit.weapon == null
-              ? WeaponState.forNewUnit(type, definitions.combat)
-              : WeaponState.ready(
-                  definitions.combat.weaponTypes[unit.weapon] ??
-                      (throw ArgumentError.value(
-                        unit.weapon,
-                        'weapon',
-                        'no such weapon',
-                      )),
-                );
-          units[unit.id] = UnitState(
-            id: unit.id,
-            sectionId: section.id,
-            type: type,
-            tree: tree,
-            xp: unit.xp,
-            location: start.location,
-            pool: start.pool,
-            health: start.health,
-            morale: start.morale,
-            weapon: weapon,
+          units[unit.id] = _unitState(
+            unit,
+            section.id,
+            definitions: definitions,
+            war: war,
+            evolution: evolution,
           );
         }
       }
@@ -379,6 +342,69 @@ final class Battle {
     }
   }
 
+  static SectionState _sectionState(
+    SectionSetup section,
+    String team,
+    GameData definitions,
+  ) {
+    for (final weapon in section.weapons) {
+      if (!definitions.combat.weaponTypes.containsKey(weapon)) {
+        throw ArgumentError.value(weapon, 'weapons', 'no such weapon');
+      }
+    }
+    return SectionState(
+      id: section.id,
+      accountId: section.accountId,
+      team: team,
+      money: section.money,
+      xp: section.xp,
+      medals: section.medals,
+      guildId: section.guildId,
+      guildChief: section.guildChief,
+      serverManaged: section.serverManaged,
+      storedWeapons: StoredWeapons(List.unmodifiable(section.weapons)),
+    );
+  }
+
+  /// [unit] in storage with full AP and HP and base morale, playing its
+  /// evolved type (UNIT-18, UNIT-31).
+  static UnitState _unitState(
+    UnitSetup unit,
+    String sectionId, {
+    required GameData definitions,
+    required WarRules war,
+    required Evolution evolution,
+  }) {
+    final base =
+        definitions.units.unitTypes[unit.type] ??
+        (throw ArgumentError.value(unit.type, 'type', 'no such unit'));
+    final tree = unit.tree ?? SkillTree();
+    final type = evolution.evolve(base, tree);
+    final start = war.atBattleStart(type);
+    final weapon = unit.weapon == null
+        ? WeaponState.forNewUnit(type, definitions.combat)
+        : WeaponState.ready(
+            definitions.combat.weaponTypes[unit.weapon] ??
+                (throw ArgumentError.value(
+                  unit.weapon,
+                  'weapon',
+                  'no such weapon',
+                )),
+          );
+    return UnitState(
+      id: unit.id,
+      sectionId: sectionId,
+      type: type,
+      tree: tree,
+      xp: unit.xp,
+      location: start.location,
+      pool: start.pool,
+      health: start.health,
+      morale: start.morale,
+      weapon: weapon,
+    );
+  }
+
   /// The battle.
   final String id;
 
@@ -443,6 +469,41 @@ final class Battle {
   /// Makes the change [change] to the state, at [time].
   void change(BattleState Function(BattleState state) change) =>
       _state = change(_state);
+
+  /// Admits [section] to [team] while the battle runs (SOC-30): its units
+  /// start in storage as at the battle's start, with full AP and HP and base
+  /// morale (UNIT-31).
+  ///
+  /// Throws an [ArgumentError] for an unknown unit type or weapon, a team the
+  /// battle does not have, and a section or a unit that is in the battle
+  /// already.
+  void admit(SectionSetup section, {required String team}) {
+    if (!_state.teams.containsKey(team)) {
+      throw ArgumentError.value(team, 'team', 'is not in the battle');
+    }
+    _unique(_state.sections, section.id, 'section');
+    final war = WarRules(battle: settings, morale: definitions.combat.morale);
+    final evolution = Evolution(definitions.units.trees);
+    final admitted = _sectionState(section, team, definitions);
+    final units = <UnitState>[];
+    for (final unit in section.units) {
+      _unique(_state.units, unit.id, 'unit');
+      units.add(
+        _unitState(
+          unit,
+          section.id,
+          definitions: definitions,
+          war: war,
+          evolution: evolution,
+        ),
+      );
+    }
+    change(
+      (state) => [
+        for (final unit in units) unit,
+      ].fold(state.withSection(admitted), (next, unit) => next.withUnit(unit)),
+    );
+  }
 
   /// Schedules [timer] at the battle time [at].
   ///

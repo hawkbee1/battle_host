@@ -8,6 +8,7 @@ import 'package:hawkbee_schema/hawkbee_schema.dart';
 import 'package:test/test.dart';
 
 import '../../helpers/fixtures.dart';
+import '../../helpers/orders.dart' show snapshotOf;
 
 const String _battles = AppwriteIds.battlesTableId;
 
@@ -396,6 +397,266 @@ void main() {
       await rows.delete(_battles, 'b-1');
 
       expect(await placement.report(), isEmpty);
+    });
+  });
+
+  group('SOC-30 a newcomer joins a running battle', () {
+    /// What the backend's join writes: the section of `a-3` in the war, and
+    /// its id in the team of the battle's row (SOC-02, SOC-30).
+    Future<void> joinWar(
+      Rows rows, {
+      String id = 's-3',
+      String team = 'team-2',
+      KeptSection kept = const KeptSection(
+        money: 500,
+        xp: 0,
+        units: [KeptUnit(id: 's-3-commander', type: 'commander')],
+      ),
+      bool section = true,
+    }) async {
+      if (section) {
+        await rows.put(
+          AppwriteIds.sectionsTableId,
+          id,
+          SectionRow(
+            id: id,
+            warId: 'w-1',
+            accountId: 'a-3',
+            kept: kept,
+          ).toData(),
+        );
+      }
+      final row = await battleRow(rows);
+      await rows.put(
+        _battles,
+        'b-1',
+        row
+            .copyWith(
+              teams: {
+                ...row.teams,
+                team: [...row.teams[team]!, id],
+              },
+            )
+            .toData(),
+      );
+    }
+
+    Iterable<LogEntry> admissions(MemoryWriteAheadLog wal) => wal
+        .read('b-1')
+        .entries
+        .where((entry) => entry.command?.order is AdmitSection);
+
+    test(
+      'admits the section a newcomer created to the team of the row of '
+      'the battle, with its money and its commander in storage, once',
+      () async {
+        final rows = await warRows();
+        final wal = MemoryWriteAheadLog();
+        final host = hostOn(wal: wal);
+        final placement = placementOf(rows, host);
+        await placement.sync();
+        await joinWar(rows);
+
+        // The battle runs already: nothing begins, the section is admitted.
+        expect(await placement.sync(), isEmpty);
+
+        final section = host['b-1']!.state.sections['s-3']!;
+        expect(
+          (section.team, section.accountId, section.money, section.xp),
+          ('team-2', 'a-3', 500, 0.0),
+        );
+        expect(host['b-1']!.state.units['s-3-commander']!.sectionId, 's-3');
+        await placement.sync();
+        final entries = admissions(wal).toList();
+        expect(entries, hasLength(1));
+        expect(entries.single.command!.origin, Origin.server);
+        expect(
+          entries.single.command!.sender,
+          const Sender(accountId: 'a-3', sectionId: 's-3'),
+        );
+        expect(reporter.reports, isEmpty);
+      },
+    );
+
+    test('admits a newcomer to the other team when its row says so', () async {
+      final rows = await warRows();
+      final host = hostOn();
+      final placement = placementOf(rows, host);
+      await placement.sync();
+      await joinWar(rows, team: 'team-1');
+
+      await placement.sync();
+
+      expect(host['b-1']!.state.sections['s-3']!.team, 'team-1');
+    });
+
+    test('stack decision 2 a battle recovered from its snapshot and log '
+        'has the newcomer: the log holds the admission', () async {
+      final rows = await warRows();
+      final snapshots = MemorySnapshotStore();
+      final logs = MemoryLogSink();
+      final wal = MemoryWriteAheadLog();
+      final first = hostOn(snapshots: snapshots, logs: logs, wal: wal);
+      await placementOf(rows, first).sync();
+      await first.settle();
+      await joinWar(rows);
+      await placementOf(rows, first).sync();
+      expect(first['b-1']!.state.sections, contains('s-3'));
+      final second = hostOn(snapshots: snapshots, logs: logs, wal: wal);
+
+      expect(await placementOf(rows, second).sync(), ['b-1']);
+
+      expect(snapshotOf(second['b-1']!), snapshotOf(first['b-1']!));
+      expect(second['b-1']!.state.sections, contains('s-3'));
+      expect(reporter.reports, isEmpty);
+    });
+
+    test('reports a section whose row is missing, and admits it at the '
+        'next sync once the row is there', () async {
+      final rows = await warRows();
+      final host = hostOn();
+      final placement = placementOf(rows, host);
+      await placement.sync();
+      await joinWar(rows, section: false);
+
+      await placement.sync();
+
+      expect(reporter.reports.single.$1, isA<StateError>());
+      expect(reporter.reports.single.$2, 'b-1');
+      expect(host['b-1']!.state.sections, isNot(contains('s-3')));
+      await rows.put(
+        AppwriteIds.sectionsTableId,
+        's-3',
+        const SectionRow(
+          id: 's-3',
+          warId: 'w-1',
+          accountId: 'a-3',
+          kept: KeptSection(
+            money: 500,
+            xp: 0,
+            units: [KeptUnit(id: 's-3-commander', type: 'commander')],
+          ),
+        ).toData(),
+      );
+
+      await placement.sync();
+
+      expect(host['b-1']!.state.sections, contains('s-3'));
+    });
+
+    for (final (name, kept) in [
+      (
+        'section XP',
+        const KeptSection(
+          money: 500,
+          xp: 5,
+          units: [KeptUnit(id: 's-3-commander', type: 'commander')],
+        ),
+      ),
+      (
+        'a spare weapon',
+        const KeptSection(
+          money: 500,
+          xp: 0,
+          weapons: ['anti_tank'],
+          units: [KeptUnit(id: 's-3-commander', type: 'commander')],
+        ),
+      ),
+      (
+        'a tree step',
+        const KeptSection(
+          money: 500,
+          xp: 0,
+          units: [
+            KeptUnit(id: 's-3-commander', type: 'commander', tree: {'hp': 1}),
+          ],
+        ),
+      ),
+      (
+        'unit XP',
+        const KeptSection(
+          money: 500,
+          xp: 0,
+          units: [
+            KeptUnit(id: 's-3-commander', type: 'commander', xpEarned: 1),
+          ],
+        ),
+      ),
+      (
+        'another weapon',
+        const KeptSection(
+          money: 500,
+          xp: 0,
+          units: [
+            KeptUnit(
+              id: 's-3-commander',
+              type: 'commander',
+              weapon: 'machine_gun',
+            ),
+          ],
+        ),
+      ),
+    ]) {
+      test('SOC-18 reports and does not admit a section that is not a new '
+          'one, since it has $name: an admission carries none', () async {
+        final rows = await warRows();
+        final host = hostOn();
+        final placement = placementOf(rows, host);
+        await placement.sync();
+        await joinWar(rows, kept: kept);
+
+        await placement.sync();
+
+        expect(reporter.reports.single.$1, isA<StateError>());
+        expect(host['b-1']!.state.sections, isNot(contains('s-3')));
+      });
+    }
+
+    test(
+      'reports an admission the battle refuses, and changes nothing',
+      () async {
+        final rows = await warRows();
+        final host = hostOn();
+        final placement = placementOf(rows, host);
+        await placement.sync();
+        // The newcomer's commander has the ID of a unit the battle has.
+        await joinWar(
+          rows,
+          kept: const KeptSection(
+            money: 500,
+            xp: 0,
+            units: [KeptUnit(id: 'c-1', type: 'commander')],
+          ),
+        );
+        final units = host['b-1']!.state.units.length;
+
+        await placement.sync();
+
+        expect(
+          (reporter.reports.single.$1 as StateError).message,
+          contains('unit_exists'),
+        );
+        expect(host['b-1']!.state.sections, isNot(contains('s-3')));
+        expect(host['b-1']!.state.units, hasLength(units));
+      },
+    );
+
+    test('does not admit to a battle that moved to another host', () async {
+      final rows = await warRows();
+      final host = hostOn();
+      final placement = placementOf(rows, host);
+      await placement.sync();
+      await joinWar(rows);
+      final row = await battleRow(rows);
+      await rows.put(
+        _battles,
+        'b-1',
+        row.copyWith(host: () => 'host-2').toData(),
+      );
+
+      await placement.sync();
+
+      expect(host['b-1'], isNull);
     });
   });
 

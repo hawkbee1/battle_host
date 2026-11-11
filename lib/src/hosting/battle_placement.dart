@@ -3,6 +3,7 @@ import 'package:battle_host/src/core/battle.dart';
 import 'package:battle_host/src/core/battle_setup.dart';
 import 'package:battle_host/src/core/simulation_host.dart';
 import 'package:battle_host/src/ports/error_reporter.dart';
+import 'package:battle_protocol/battle_protocol.dart';
 import 'package:battle_rules/battle_rules.dart';
 import 'package:hawkbee_schema/hawkbee_schema.dart';
 
@@ -24,9 +25,15 @@ import 'package:hawkbee_schema/hawkbee_schema.dart';
 ///
 /// A battle it runs whose row names another host has moved: it stops
 /// running it, and the endpoints send its clients to look for the new
-/// host. A battle it claims may have run elsewhere since this host last
-/// held it, so its own write-ahead log of it is discarded: the uploaded
-/// log is its history. A host that [leave]s lets go of its battles whose
+/// host. A section that joined the war while the battle runs is in its row's
+/// teams (the backend put it there, SOC-30): at each sync the host admits the
+/// sections of the row that the battle does not have, with the server's
+/// `AdmitSection`, which the log holds and a replay makes again; one it
+/// cannot admit is reported and tried again at the next sync.
+///
+/// A battle it claims may have run elsewhere since this host last held it,
+/// so its own write-ahead log of it is discarded: the uploaded log is its
+/// history. A host that [leave]s lets go of its battles whose
 /// log is all uploaded, so that another host takes them at once.
 ///
 /// Once a battle has ended, [report] writes its result in its row (status
@@ -96,7 +103,11 @@ final class BattlePlacement {
       if (!mapIds.contains(row.mapId)) continue;
       final named = row.host;
       if (host[id] != null) {
-        if (named != hostId) _let(id);
+        if (named != hostId) {
+          _let(id);
+        } else {
+          await _admitNewcomers(row);
+        }
         continue;
       }
       if (named != null &&
@@ -123,6 +134,60 @@ final class BattlePlacement {
     }
     return begun;
   }
+
+  /// Admits to the running battle of [row] each section its teams name that
+  /// the battle does not have (SOC-30). A section that joined during the
+  /// battle is a new one (SOC-18): its commander and its starting money. A
+  /// section with more than that, or a refused admission, is reported.
+  Future<void> _admitNewcomers(BattleRow row) async {
+    final battle = host[row.id]!;
+    for (final MapEntry(key: team, value: ids) in row.teams.entries) {
+      for (final id in ids) {
+        if (battle.state.sections.containsKey(id)) continue;
+        try {
+          final section = await _section(id);
+          if (!_isNew(section)) {
+            throw StateError('the section $id is not a new one: not admitted');
+          }
+          final handled = host.submit(
+            row.id,
+            Command(
+              sender: Sender(accountId: section.accountId, sectionId: id),
+              sentAt: battle.time,
+              order: AdmitSection(
+                team: team,
+                money: section.money,
+                units: [
+                  for (final unit in section.units)
+                    AdmittedUnit(unitId: unit.id, unitType: unit.type),
+                ],
+              ),
+            ),
+            origin: Origin.server,
+          );
+          if (handled.refusal case final refusal?) {
+            throw StateError('the section $id is not admitted: $refusal');
+          }
+        } on Object catch (error, stackTrace) {
+          await reporter.report(error, stackTrace, battleId: row.id);
+        }
+      }
+    }
+  }
+
+  /// Whether [section] is what a newcomer starts with, which is all an
+  /// `AdmitSection` carries: no XP, no spare weapon, and units with no tree
+  /// step, no XP and no other weapon than their type's.
+  static bool _isNew(SectionSetup section) =>
+      section.xp == 0 &&
+      section.weapons.isEmpty &&
+      section.units.every(
+        (unit) =>
+            (unit.tree?.steps.isEmpty ?? true) &&
+            unit.xp.earned == 0 &&
+            unit.xp.unspent == 0 &&
+            unit.weapon == null,
+      );
 
   /// Lets go of every battle it runs whose log is all uploaded, in their
   /// rows, and deletes its `hosts` row: the host stops, after its battles'
