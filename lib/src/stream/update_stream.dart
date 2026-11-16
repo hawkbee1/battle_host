@@ -70,9 +70,9 @@ final class UpdateStream {
   };
 
   /// Subscribes [subscriber] to [sectionId]: it gets the section's whole
-  /// view at once, then what the battle lets it buy (`Roster`), then the
-  /// alerts its player has not received yet, then
-  /// its updates.
+  /// view at once, then what the battle lets it buy (`Roster`), then who
+  /// manages its team's HQ (`ManagerNotice`), then the alerts its player has
+  /// not received yet, then its updates.
   ///
   /// Throws an [ArgumentError] for a section not in the battle.
   void subscribe(String sectionId, SectionSubscriber subscriber) {
@@ -100,7 +100,8 @@ final class UpdateStream {
     }
     subscriber
       ..send(view)
-      ..send(views.roster());
+      ..send(views.roster())
+      ..send(views.manager(section.team));
     battle.alerts.take(section.accountId).forEach(subscriber.send);
   }
 

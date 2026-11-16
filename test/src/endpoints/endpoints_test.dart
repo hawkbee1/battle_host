@@ -495,14 +495,23 @@ void main() {
       expect(socket.closes, equals([CloseCode.normal]));
     });
 
-    test('a resync request gets the whole view again, and the roster after '
-        'it', () async {
+    test('a resync request gets the whole view again, and the roster and the '
+        'manager after it', () async {
       final (connection, socket) = await connect(frameOf(_jwt('jwt-2')));
 
       final again = await say(connection, socket, const ResyncRequest());
 
       expect(socket.messages[2], isA<Roster>());
-      expect(again, equals([socket.messages[1], socket.messages[2]]));
+      // The first notice came before the player's login made him manager.
+      expect(socket.messages[3], const ManagerNotice());
+      expect(
+        again,
+        equals([
+          socket.messages[1],
+          socket.messages[2],
+          const ManagerNotice(accountId: 'a-2'),
+        ]),
+      );
     });
 
     test('a slow client is dropped past its queue bound, and catches up '

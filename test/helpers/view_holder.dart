@@ -14,6 +14,7 @@ final class ViewHolder implements SectionSubscriber {
   SectionPrivate? section;
   String? weather;
   Roster? roster;
+  String? manager;
   (String, Duration)? hold;
   final craters = <(int, int, double, double)>[];
   final built = <String, String>{};
@@ -74,6 +75,8 @@ final class ViewHolder implements SectionSubscriber {
         }
       case Roster():
         roster = message;
+      case ManagerNotice(:final accountId):
+        manager = accountId;
       case SignInAccepted() ||
           SignInRefused() ||
           CommandAccepted() ||

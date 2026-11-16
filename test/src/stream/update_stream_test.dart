@@ -284,7 +284,8 @@ void main() {
 
         expect(holder.received[0], isA<SectionView>());
         expect(holder.received[1], isA<Roster>());
-        expect(holder.received[2], isA<RelicAlert>());
+        expect(holder.received[2], isA<ManagerNotice>());
+        expect(holder.received[3], isA<RelicAlert>());
         expect(holder.roster, SectionViews(f.battle).roster());
 
         final again = ViewHolder();
@@ -293,6 +294,29 @@ void main() {
           ..subscribe('f-1', 's-3', again);
         expect(again.received[1], equals(holder.roster));
       });
+
+      test(
+        'HQ-05 a subscriber is told who manages the HQ of its team right after '
+        'the roster: nobody before a player of the team logged in',
+        () {
+          final none = ViewHolder();
+          f.host.subscribe('f-1', 's-1', none);
+          expect(none.received[2], const ManagerNotice());
+
+          f.battle.change(
+            (state) =>
+                state.withTeam(state.teams['team-1']!.withManager('a-3')),
+          );
+          final managed = ViewHolder();
+          final other = ViewHolder();
+          f.host
+            ..subscribe('f-1', 's-3', managed)
+            ..subscribe('f-1', 's-2', other);
+
+          expect(managed.manager, 'a-3');
+          expect(other.manager, isNull);
+        },
+      );
 
       test('decision 233 the alerts not received yet survive a restart, from '
           'the snapshot or from the log after it', () async {

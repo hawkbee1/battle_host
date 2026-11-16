@@ -107,6 +107,10 @@ final class SectionViews {
     owner: relic.owner,
   );
 
+  /// Who manages the HQ of [team] (HQ-05), for a section of that team.
+  ManagerNotice manager(String team) =>
+      ManagerNotice(accountId: _state.teams[team]!.managerAccountId);
+
   /// The own state of [sectionId].
   SectionPrivate section(String sectionId) {
     final section = _state.sections[sectionId]!;
