@@ -640,6 +640,40 @@ void main() {
       expect((events.last as ObjectDamaged).object, equals('building'));
     });
 
+    group('on a map of 2 m cells', () {
+      setUp(() => f = OrdersFixture(map: valleyOfCells(2)));
+
+      test('an object that blocks sight still stands 10 m tall: a shot '
+          'rising over a building cell stops on it', () {
+        place('soldier-1', const CellRef(7, 2));
+        place('soldier-2', const CellRef(9, 2));
+        f.wait(const Duration(seconds: 2));
+        final events = eventsOf(
+          FireAimed(
+            unitId: 'soldier-1',
+            aim: Direction.of(1, 0, 1.5),
+            fireTime: f.battle.time,
+          ),
+        );
+
+        expect((events.last as ObjectDamaged).object, equals('building'));
+      });
+
+      test('a unit still reaches 15 m around, not one cell', () {
+        hurt('soldier-1', 50);
+        place('soldier-1', const CellRef(8, 3));
+        expect(
+          eventsOf(const Heal(unitId: 'medic-1', targetId: 'soldier-1')),
+          hasLength(1),
+        );
+        place('soldier-1', const CellRef(9, 3));
+        expect(
+          refusalOf(const Heal(unitId: 'medic-1', targetId: 'soldier-1')),
+          equals('too_far'),
+        );
+      });
+    });
+
     group('COMBAT-38 the final blow of a commander', () {
       /// The result of commander-1's final blow on soldier-2, a beaten
       /// soldier at 1 HP, in a battle of [seed], when its section has

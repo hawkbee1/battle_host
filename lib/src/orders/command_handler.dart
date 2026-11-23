@@ -261,9 +261,10 @@ final class CommandHandler {
       unit.cell!.surface == other.surface &&
       world.distanceM(unit.cell!, other) <= metres;
 
-  /// One cell around: where a unit reaches to heal, repair, embark or build
-  /// (assumed, see the session log).
-  double get _reach => world.cellSizeM * 1.5;
+  /// Where a unit reaches to heal, repair, embark or build, in metres: one
+  /// cell around on a map of 10 m cells, the same on any map (assumed,
+  /// Q-MAP-30 of `95-open-questions.md`).
+  static const _reach = 15.0;
 
   // Movement (MAP-04, COMBAT-03, COMBAT-06; stack decision 8).
 

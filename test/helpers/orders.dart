@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:battle_host/battle_host.dart';
+import 'package:battle_map/battle_map.dart' show BuiltMapFiles;
 import 'package:battle_pathfinding/battle_pathfinding.dart';
 import 'package:battle_protocol/battle_protocol.dart';
 import 'package:battle_rules/battle_rules.dart';
@@ -101,17 +102,18 @@ void deploy(Battle battle) => battle.change((state) {
 final class OrdersFixture {
   /// A fixture whose senders may send [rateLimit] orders, with the random
   /// of [seed]; the server runs `s-2` when [serverManaged]. The battle plays
-  /// with [settings], else with the plan's.
+  /// with [settings], else with the plan's, on [map], else on the valley.
   new({
     RateLimit? rateLimit,
     this.seed = 11,
     this.serverManaged = false,
     BattleSettings? settings,
+    BuiltMapFiles? map,
   }) {
     host = SimulationHost(
       clock: clock,
       maps: MapLibrary(
-        source: MemoryMapSource({'valley': valley}),
+        source: MemoryMapSource({'valley': map ?? valley}),
         terrain: planData.terrain,
       ),
       definitions: planData,

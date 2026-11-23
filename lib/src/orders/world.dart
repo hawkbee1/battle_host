@@ -5,6 +5,12 @@ import 'package:battle_pathfinding/battle_pathfinding.dart';
 import 'package:battle_protocol/battle_protocol.dart' as wire;
 import 'package:battle_rules/battle_rules.dart';
 
+/// How tall an object that blocks sight stands above its cell's ground, in
+/// metres, for sight lines and shots: a cell's height on a map of 10 m
+/// cells, the same on any map (assumed, Q-MAP-30 of
+/// `95-open-questions.md`).
+const objectHeightM = 10.0;
+
 /// {@template world}
 /// The geometry of a battle's world on its shared map: the cell under a
 /// position, a unit's point, distances, sight lines (MAP-29) and the
@@ -187,7 +193,7 @@ final class World implements ObstacleQuery {
       if (z < ground.height) return distance;
       final blocks = objectsOn(cell)
           .any((object) => terrain.objects[object]?.blocksLos ?? false);
-      if (blocks && z < ground.height + cellSizeM) return distance;
+      if (blocks && z < ground.height + objectHeightM) return distance;
     }
     return null;
   }

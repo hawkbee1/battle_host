@@ -16,15 +16,21 @@ const valleySource = '../battle_map/test/fixtures/valley';
 final GameData planData = readPlan(planPath);
 
 /// The valley map, built by `battle_map`'s builder.
-final BuiltMapFiles valley = () {
+final BuiltMapFiles valley = valleyOfCells(10);
+
+/// The test map with cells of [cellSizeM] metres: 10 for the valley as it
+/// is, less for a map of small cells.
+BuiltMapFiles valleyOfCells(double cellSizeM) {
   final map = MapData.fromSource(
-    mapYaml: File('$valleySource/$mapFile').readAsStringSync(),
+    mapYaml: File('$valleySource/$mapFile')
+        .readAsStringSync()
+        .replaceFirst('cell_size_m: 10\n', 'cell_size_m: $cellSizeM\n'),
     heightsPng: File('$valleySource/heights.png').readAsBytesSync(),
     terrainPng: File('$valleySource/terrain.png').readAsBytesSync(),
     objectsYaml: File('$valleySource/$objectsFile').readAsStringSync(),
   );
   return (buildMap(map, planData) as MapBuilt).files;
-}();
+}
 
 /// Maps in memory, counting how often each is read.
 final class MemoryMapSource implements MapSource {
