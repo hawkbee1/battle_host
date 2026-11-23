@@ -8,10 +8,6 @@ import 'package:battle_protocol/battle_protocol.dart';
 import 'package:dart_appwrite/dart_appwrite.dart';
 import 'package:hawkbee_schema/hawkbee_schema.dart';
 
-/// The longest battle ID the Appwrite adapters store: a file ID holds at
-/// most 36 characters, and a batch's adds 13 to the battle's.
-const maxStoredBattleId = 23;
-
 /// The first bytes of a snapshot file, before compression: `BTSN`.
 const _snapshotMagic = [0x42, 0x54, 0x53, 0x4E];
 
@@ -51,7 +47,7 @@ final class AppwriteLogSink implements LogSink {
   ///
   /// Throws an [ArgumentError] for a battle ID that does not fit a file ID.
   static String fileId(String battleId, int from) {
-    checkFileName(battleId, maxLength: maxStoredBattleId);
+    checkFileName(battleId, maxLength: maxBattleIdLength);
     return '$battleId-${from.toString().padLeft(12, '0')}';
   }
 
@@ -111,7 +107,7 @@ final class AppwriteSnapshotStore implements SnapshotStore {
   final _latestSlot = <String, int>{};
 
   static String _fileId(String battleId, int slot) {
-    checkFileName(battleId, maxLength: maxStoredBattleId);
+    checkFileName(battleId, maxLength: maxBattleIdLength);
     return '$battleId-s$slot';
   }
 

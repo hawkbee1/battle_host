@@ -73,11 +73,11 @@ void main() {
 
     test('refuses a battle ID that cannot name a file', () {
       expect(
-        () => AppwriteLogSink.fileId('a' * (maxStoredBattleId + 1), 0),
+        () => AppwriteLogSink.fileId('a' * (maxBattleIdLength + 1), 0),
         throwsArgumentError,
       );
       expect(() => AppwriteLogSink.fileId('../b-1', 0), throwsArgumentError);
-      expect(AppwriteLogSink.fileId('a' * maxStoredBattleId, 1).length, 36);
+      expect(AppwriteLogSink.fileId('a' * maxBattleIdLength, 1).length, 36);
     });
   });
 
